@@ -1,0 +1,7 @@
+qrcode
+reportlab
+tkcalendar
+num2words
+openpyxl
+matplotlib
+pycryptodome
