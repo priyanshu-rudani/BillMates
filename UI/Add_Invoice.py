@@ -9,9 +9,9 @@ else:  # Running as a Python script
 sys.path.append(str(root_path))
  
 from utilities.path_utils import *
-from utilities.inv import create_invoice
+from utilities.invoice_generator import create_invoice
 import tkinter as tk
-from tkinter import ttk, Canvas, Entry, Text, Button, PhotoImage, messagebox, Scrollbar, filedialog, END
+from tkinter import ttk, Canvas, Entry, Text, Button, PhotoImage, messagebox, Scrollbar, filedialog, END, Spinbox
 from tkcalendar import DateEntry
 import re
 from datetime import datetime, timedelta
@@ -93,15 +93,15 @@ def new_invoice_ui(parent = None):
             
             # get dummy table items
             items = fetch_data('''
-                SELECT rowid, item_code, item_name, quantity, unit, price, subtotal, GST_Rate, taxes, discount, Total FROM DummyInvoiceItems WHERE invoice_no = ? AND client_id = ?''', 
+                SELECT rowid, item_code, item_name, quantity, unit, price, subtotal, discount_percent, discount_amount, GST_Rate, taxes, Total FROM DummyInvoiceItems WHERE invoice_no = ? AND client_id = ?''', 
                 (i_invoice_no, i_client_id)
             )
 
             # Insert to Orignal Table
             for item in items:
                 run_query('''
-                    INSERT INTO InvoiceItems (invoice_no, client_id, item_code, item_name, quantity, unit, price, subtotal, GST_Rate, taxes, discount, Total) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ''', (i_invoice_no, i_client_id, item[1], item[2], item[3], item[4], item[5], item[6], item[7], item[8], item[9], item[10]))
+                    INSERT INTO InvoiceItems (invoice_no, client_id, item_code, item_name, quantity, unit, price, subtotal, discount_percent, discount_amount, GST_Rate, taxes, Total) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (i_invoice_no, i_client_id, item[1], item[2], item[3], item[4], item[5], item[6], item[7], item[8], item[9], item[10], item[11]))
 
 
             # Delete Dummy table data
@@ -142,7 +142,7 @@ def new_invoice_ui(parent = None):
             canvas.itemconfig(round_off_txt, text="0.0")
             canvas.itemconfig(grand_total_txt, text="0.0")
 
-            customer_name.config(state='normal')
+            customer_name.config(state='readonly')
 
             # Clear form fields
             invoice_no.delete(0, tk.END)
@@ -190,22 +190,38 @@ def new_invoice_ui(parent = None):
     def calculate_total(*args):
         try:
             # Get the values from the input fields
-            v_qty = float(qty_var.get() or 0)
-            v_price = float(price_var.get() or 0)
-            v_gst_rate = float(gst_var.get() or 0)
-            v_discount = float(discount_var.get() or 0)
+            v_qty = float(qty.get() or 0)
+            v_price = float(price.get() or 0)
+            v_gst_rate = float(gst.get() or 0)
+            v_discount_percent = float(discount.get() or 0)
     
-            # Calculate the total
+            # Calculate subtotal (qty * price)
             subtotal = (v_qty * v_price)
-            gst_amount = (subtotal * v_gst_rate) / 100
-            itemTotal = (subtotal + gst_amount) - v_discount
+            
+            # Calculate discount amount (percentage based)
+            discount_amount = (subtotal * v_discount_percent) / 100
+            
+            # Taxable amount after discount
+            taxable_amount = subtotal - discount_amount
+            
+            # Calculate GST on taxable amount (after discount)
+            gst_amount = (taxable_amount * v_gst_rate) / 100
+            
+            # Final item total = taxable amount + gst amount
+            itemTotal = taxable_amount + gst_amount
     
             # Update the total entry field
-            item_total_var.set(f"{itemTotal:.2f}")
+            item_total.config(state='normal')
+            item_total.delete(0, END)
+            item_total.insert(0, f"{itemTotal:.2f}")
+            item_total.config(state='readonly')
 
         except ValueError:
             # Handle any conversion errors
-            item_total_var.set("Error")
+            item_total.config(state='normal')
+            item_total.delete(0, END)
+            item_total.insert(0, "Error")
+            item_total.config(state='readonly')
 
     def update_value():
         i_invoice_no = invoice_no.get()
@@ -215,12 +231,15 @@ def new_invoice_ui(parent = None):
         Compney_state = read_ini("PROFILE", "state")
         Clients_state = fetch_data(f"SELECT state FROM Clients WHERE id = {i_client_id}")[0][0]
 
-        Sub_Total =fetch_data(f'SELECT SUM(subtotal) FROM DummyInvoiceItems WHERE invoice_no = {i_invoice_no} AND client_id = {i_client_id}')[0][0] or 0.0
-        Discount = fetch_data(f'SELECT SUM(discount) FROM DummyInvoiceItems WHERE invoice_no = {i_invoice_no} AND client_id = {i_client_id}')[0][0] or 0.0
+        Sub_Total = fetch_data(f'SELECT SUM(subtotal) FROM DummyInvoiceItems WHERE invoice_no = {i_invoice_no} AND client_id = {i_client_id}')[0][0] or 0.0
+        Discount_Amount = fetch_data(f'SELECT SUM(discount_amount) FROM DummyInvoiceItems WHERE invoice_no = {i_invoice_no} AND client_id = {i_client_id}')[0][0] or 0.0
         Total_Taxes = fetch_data(f'SELECT SUM(taxes) FROM DummyInvoiceItems WHERE invoice_no = {i_invoice_no} AND client_id = {i_client_id}')[0][0] or 0.0
         Gross_Total = fetch_data(f'SELECT SUM(Total) FROM DummyInvoiceItems WHERE invoice_no = {i_invoice_no} AND client_id = {i_client_id}')[0][0] or 0.0
 
-        Taxable_Amount = float(Sub_Total) - float(Discount)
+        # Taxable amount = Subtotal - Discount (discount applied before tax)
+        Taxable_Amount = float(Sub_Total) - float(Discount_Amount)
+        
+        # Total = Taxable Amount + Taxes
         Total = Taxable_Amount + float(Total_Taxes)
 
         if Compney_state == Clients_state:
@@ -234,24 +253,21 @@ def new_invoice_ui(parent = None):
         Grand_Total = Total + Round_Off
 
         Taxable_Amount = round(float(Taxable_Amount), 2)
+        Total_Taxes = round(float(Total_Taxes), 2)
         Central_Tax = round(float(Central_Tax), 2)
         State_Tax = round(float(State_Tax), 2)
         Integrated_Tax = round(float(Integrated_Tax), 2)
-        Total = round(float(Total), 2)
-        Round_Off = round(float(Round_Off), 2)
         Grand_Total = round(float(Grand_Total), 2)
-
-        canvas.itemconfig(taxable_total_txt, text=Taxable_Amount)
-        canvas.itemconfig(CGST_txt, text=Central_Tax)
-        canvas.itemconfig(SGST_txt, text=State_Tax)
-        canvas.itemconfig(IGST_txt, text=Integrated_Tax)
-        canvas.itemconfig(sub_total_txt, text=Total)
-        canvas.itemconfig(round_off_txt, text=Round_Off)
-        canvas.itemconfig(grand_total_txt, text=Grand_Total)
-
-    # ========================================================================
-    # Add Invoice and Update Tree view
-    # ========================================================================
+        Round_Off = round(float(Round_Off), 2)
+        
+        
+        canvas.itemconfig(sub_total_txt, text=f"{Sub_Total:.2f}")
+        canvas.itemconfig(taxable_total_txt, text=f"{Taxable_Amount}")
+        canvas.itemconfig(CGST_txt, text=f"{Central_Tax}")
+        canvas.itemconfig(SGST_txt, text=f"{State_Tax}")
+        canvas.itemconfig(IGST_txt, text=f"{Integrated_Tax}")
+        canvas.itemconfig(round_off_txt, text=f"{Round_Off}")
+        canvas.itemconfig(grand_total_txt, text=f"{Grand_Total}")
 
     def add_treeview(invoice_no):
         i_customer_name = customer_name.get()
@@ -262,7 +278,7 @@ def new_invoice_ui(parent = None):
 
         # Fetch data from the database
         rows = fetch_data('''
-            SELECT rowid, item_code, item_name, quantity, unit, price, GST_Rate, taxes, discount, Total 
+            SELECT rowid, item_code, item_name, quantity, unit, price, GST_Rate, taxes, discount_percent, discount_amount, Total 
             FROM DummyInvoiceItems 
             WHERE invoice_no = ? AND client_id = ?
         ''', (invoice_no, i_client_id))
@@ -278,11 +294,11 @@ def new_invoice_ui(parent = None):
             quantity = f"{row[3]} [{row[4]}]"
             price = row[5]
             gst = f"{row[6]}% ({row[7]})" if row[7] != 0 else "0"
-            discount = row[8]
-            Total = row[9]
+            discount_pct = f"{row[8]}% (₹{row[9]})" if row[8] > 0 else "0"
+            Total = row[10]
 
             # Insert data into Treeview including Delete column
-            treeview.insert("", "end", iid=item_id, values=(idx, item_name, quantity, price, gst, discount, Total, "X"))
+            treeview.insert("", "end", iid=item_id, values=(idx, item_name, quantity, price, gst, discount_pct, Total, "X"))
 
         # Bind keyboard delete functionality
         treeview.bind("<Delete>", delete_item)
@@ -307,7 +323,6 @@ def new_invoice_ui(parent = None):
             else:
                 gst_value = "0"  # Default to "0" if no match found
 
-
             qty_string = item_values[2]
             qmatch = re.search(r"(\d+(\.\d+)?)\s*\[", qty_string)
             if qmatch:
@@ -315,6 +330,13 @@ def new_invoice_ui(parent = None):
             else:
                 qty_value = "0"
 
+            # Extract discount percentage
+            discount_string = item_values[5]
+            dmatch = re.search(r"(\d+(\.\d+)?)%", discount_string)
+            if dmatch:
+                discount_value = dmatch.group(1)
+            else:
+                discount_value = "0"
 
             # Populate entry fields with selected item values
             item_name.delete(0, END)
@@ -327,7 +349,7 @@ def new_invoice_ui(parent = None):
             qty.insert(0, qty_value)
             price.insert(0, item_values[3])
             gst.insert(0, gst_value)
-            discount.insert(0, item_values[5])
+            discount.insert(0, discount_value)
 
             # Save current selected item ID for update
             edit_mode['item_id'] = selected_item
@@ -351,26 +373,28 @@ def new_invoice_ui(parent = None):
             updated_qty = round(float(qty.get()), 2) if qty.get() else 0
             updated_price = round(float(price.get()), 2) if price.get() else 0
             updated_gst_rate = round(float(gst.get()), 2) if gst.get() else 0
-            updated_discount = round(float(discount.get()), 2) if discount.get() else 0
+            updated_discount_percent = round(float(discount.get()), 2) if discount.get() else 0
 
             updated_subtotal = round((updated_qty * updated_price), 2)
-            gst_amount = round(((updated_subtotal * updated_gst_rate) / 100), 2)
-            updated_total = round(((updated_subtotal + gst_amount) - updated_discount), 2)
+            updated_discount_amount = round((updated_subtotal * updated_discount_percent) / 100, 2)
+            taxable_amount = round((updated_subtotal - updated_discount_amount), 2)
+            gst_amount = round(((taxable_amount * updated_gst_rate) / 100), 2)
+            updated_total = round((taxable_amount + gst_amount), 2)
 
             # Update the database
             run_query('''
                 UPDATE DummyInvoiceItems 
-                SET item_code = ?, item_name = ?, quantity = ?, unit = ?, price = ?, subtotal = ?, GST_Rate = ?, taxes = ?, discount = ?, Total = ?
+                SET item_code = ?, item_name = ?, quantity = ?, unit = ?, price = ?, subtotal = ?, discount_percent = ?, discount_amount = ?, GST_Rate = ?, taxes = ?, Total = ?
                 WHERE rowid = ?
-            ''', (updated_item_code, updated_item_name, updated_qty, updated_unit, updated_price, updated_subtotal, updated_gst_rate, gst_amount, updated_discount, updated_total, selected_item))
+            ''', (updated_item_code, updated_item_name, updated_qty, updated_unit, updated_price, updated_subtotal, updated_discount_percent, updated_discount_amount, updated_gst_rate, gst_amount, updated_total, selected_item))
 
             treeview.item(selected_item, values=(
                 treeview.index(selected_item) + 1,
                 f"{updated_item_name} ({updated_item_code})",
-                f"{updated_qty} ({updated_unit})",
+                f"{updated_qty} [{updated_unit}]",
                 updated_price,
                 f"{updated_gst_rate}% ({gst_amount})",
-                updated_discount,
+                f"{updated_discount_percent}% (₹{updated_discount_amount})",
                 updated_total,
                 "X"
             ))
@@ -399,6 +423,7 @@ def new_invoice_ui(parent = None):
                     # Remove item from the Treeview
                     treeview.delete(selected_item)
                     messagebox.showinfo("Item Deleted", "Item has been deleted successfully.", parent=window)
+                    update_value()
                 except Exception as e:
                     messagebox.showerror("Error", str(e))
         else:
@@ -447,7 +472,7 @@ def new_invoice_ui(parent = None):
         i_item_code = item_code.get()
         i_item_name = item_name.get()
         i_unit = entry_9.get()
-        i_discount = round(float(discount.get()), 2) if discount.get() else 0.0
+        i_discount_percent = round(float(discount.get()), 2) if discount.get() else 0.0
         try:
             i_gst_rate = round(float(gst.get()), 2) if gst.get() else 0
             
@@ -459,8 +484,10 @@ def new_invoice_ui(parent = None):
 
         # Calculate subtotal
         i_subtotal = round((i_qty * i_price), 2)
-        gst_amount = round((i_subtotal * i_gst_rate) / 100, 2)
-        final_total = round(((i_subtotal + gst_amount) - i_discount), 2)
+        i_discount_amount = round((i_subtotal * i_discount_percent) / 100, 2)
+        taxable_amount = round((i_subtotal - i_discount_amount), 2)
+        gst_amount = round((taxable_amount * i_gst_rate) / 100, 2)
+        final_total = round((taxable_amount + gst_amount), 2)
 
 
         if edit_mode['item_id']:
@@ -470,9 +497,9 @@ def new_invoice_ui(parent = None):
 
             # Add new item to the dummy table
             run_query('''
-                INSERT INTO DummyInvoiceItems (invoice_no, client_id , item_code, item_name, quantity, unit, price, subtotal, GST_Rate, taxes, discount, Total)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (i_invoice_no, i_client_id , i_item_code, i_item_name, i_qty, i_unit, i_price, i_subtotal, i_gst_rate, gst_amount, i_discount, final_total))
+                INSERT INTO DummyInvoiceItems (invoice_no, client_id , item_code, item_name, quantity, unit, price, subtotal, discount_percent, discount_amount, GST_Rate, taxes, Total)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (i_invoice_no, i_client_id , i_item_code, i_item_name, i_qty, i_unit, i_price, i_subtotal, i_discount_percent, i_discount_amount, i_gst_rate, gst_amount, final_total))
 
 
         update_value()
@@ -499,51 +526,20 @@ def new_invoice_ui(parent = None):
         discount.delete(0, END)
         discount.insert(0, "0")
         edit_mode['item_id'] = None
-        item_code.focus_set()
 
-
-    def get_client_names():
+    def update_payment(*args):
         try:
-            # Fetch names of all clients where client_type is 'Client'
-            result = fetch_data("SELECT name FROM Clients WHERE client_type = 'Client'")
-            clients = [row[0] for row in result]
-            return clients
-        except Exception as e:
-            messagebox.showinfo("Error", f"Error fetching client names: {e}", parent=window)
-            return []
-
-    def on_client_selected(event):
-        selected_client = customer_name.get()
-        client_id = get_client_id(selected_client)
-        if selected_client:
-            try:
-                invoice_no.delete(0, 'end')
-                gst_no.delete(0, 'end')
-                contect_no.delete(0, 'end')
-
-                # Fetch data for the selected client
-                client_data = fetch_data("SELECT * FROM Clients WHERE client_type = 'Client' AND name = ?", (selected_client,))
-
-                result = fetch_data('''SELECT MAX(invoice_no) FROM Invoices WHERE client_id = ?''', (client_id,))
-                
-                if not result[0] or result[0][0] is None:
-                    db_invoice_no = 1
-                else:
-                    db_invoice_no = result[0][0] + 1
-
-                Number = "00+ 00000 00000"
-
-                if len(client_data[0][2]) == 10:
-                    Number = f"91+ {client_data[0][2][:5]} {client_data[0][2][5:]}"
-                    
-                if client_data:
-                    # Assuming columns are in order: id, name, contact_no, gst, city, state, client_type
-                    contect_no.insert(0, Number)
-                    gst_no.insert(0, client_data[0][3])
-                    invoice_no.insert(0, db_invoice_no)
-
-            except Exception as e:
-                messagebox.showinfo("Error", f"Error fetching client Data: {e}", parent=window)
+            i_total = get_total_for_invoice(invoice_no.get())
+            i_paid = float(amount_paid.get()) if amount_paid.get() else 0.0
+            i_remaining = i_total - i_paid
+            amount_remain.config(state='normal')
+            amount_remain.delete(0, tk.END)
+            amount_remain.insert(0, f"{i_remaining:.2f}")
+            amount_remain.config(state='readonly')
+        except ValueError:
+            amount_remain.config(state='normal')
+            amount_remain.delete(0, tk.END)
+            amount_remain.config(state='readonly')
 
     def export_invoice():
         inv = invoice_no.get()
@@ -598,105 +594,91 @@ def new_invoice_ui(parent = None):
                 if response == 'yes':
                     os.startfile(file_path)
 
-
-    def update_payment(*args):
-        i_invoice_no = invoice_no.get()
-        i_customer_name = customer_name.get()
-        i_client_id = get_client_id(i_customer_name)
-
-        query = f"""SELECT SUM(Total) FROM DummyInvoiceItems WHERE invoice_no = ? AND client_id = ?"""
-        result = fetch_data(query, (i_invoice_no, i_client_id))
-
-        Total = result[0][0] if result and result[0][0] is not None else 0
-
-        paid = amount_paid.get() 
-        if paid:
-            Remain = float(Total) - float(paid)
-            Remain = round(Remain, 2)
-        elif paid == 0 or paid == "":
-            Remain = round(float(Total), 2)
-        else:
-            Remain = "Error"
-
-        amount_remain.config(state="normal")
-        amount_remain.delete(0, END)
-        amount_remain.insert(0, Remain)
-        amount_remain.config(state="readonly")
-
-
-    def on_item_name_select(event):
+    def get_client_names():
         try:
-            selected_index = event.widget.curselection()[0]
-            selected_value = str(event.widget.get(selected_index))
+            # Fetch names of all clients where client_type is 'Client'
+            result = fetch_data("SELECT name FROM Clients WHERE client_type = 'Client'")
+            clients = [row[0] for row in result]
+            return clients
+        except Exception as e:
+            messagebox.showinfo("Error", f"Error fetching client names: {e}", parent=window)
+            return []
 
-            result = fetch_data('''SELECT id FROM Items WHERE item_name = ?''', (selected_value,))
-            Item_id = result[0][0] if result else 0
+    def on_client_selected(event):
+        selected_client = customer_name.get()
+        client_id = get_client_id(selected_client)
+        if selected_client:
+            try:
+                invoice_no.delete(0, 'end')
+                gst_no.delete(0, 'end')
+                contect_no.delete(0, 'end')
 
-            Item_data = fetch_data('''SELECT * FROM Items WHERE id = ?''', (Item_id,))[0]
+                # Fetch data for the selected client
+                client_data = fetch_data("SELECT * FROM Clients WHERE client_type = 'Client' AND name = ?", (selected_client,))
 
-            item_code.delete(0, END)
-            item_code.insert(0, Item_data[1])
-            item_name.delete(0, END)
-            item_name.insert(0, Item_data[2])
-            price.delete(0, END)
-            price.insert(0, Item_data[3])
-            discount.delete(0, END)
-            discount.insert(0, Item_data[5])
-            gst.delete(0, END)
-            gst.insert(0, Item_data[6])
+                result = fetch_data('''SELECT MAX(invoice_no) FROM Invoices WHERE client_id = ?''', (client_id,))
+                
+                if not result[0] or result[0][0] is None:
+                    db_invoice_no = 1
+                else:
+                    db_invoice_no = result[0][0] + 1
 
-            def set_focus():
-                qty.focus_set()
-                qty.delete(0, tk.END)
+                Number = "00+ 00000 00000"
 
-            window.after(10, set_focus)
+                if len(client_data[0][2]) == 10:
+                    Number = f"91+ {client_data[0][2][:5]} {client_data[0][2][5:]}"
+                    
+                if client_data:
+                    # Assuming columns are in order: id, name, contact_no, gst, city, state, client_type
+                    contect_no.insert(0, Number)
+                    gst_no.insert(0, client_data[0][3])
+                    invoice_no.insert(0, db_invoice_no)
 
-
-        except IndexError:
-            # This handles the case where the selection is cleared
-            pass
+            except Exception as e:
+                messagebox.showinfo("Error", f"Error fetching client Data: {e}", parent=window)
 
     def on_item_code_select(event):
-        try:
-            selected_index = event.widget.curselection()[0]
-            selected_value = str(event.widget.get(selected_index))
-
-            result = fetch_data('''SELECT id FROM Items WHERE item_code = ?''', (selected_value,))
-            Item_id = result[0][0] if result else 0
-
-            Item_data = fetch_data('''SELECT * FROM Items WHERE id = ?''', (Item_id,))[0]
-
+        selection = listbox.curselection()
+        if selection:
+            selected_item_code = listbox.get(selection[0])
             item_code.delete(0, END)
-            item_code.insert(0, Item_data[1])
+            item_code.insert(0, selected_item_code)
+            
+            # Fetch item details
+            item_details = fetch_data(f"SELECT item_name, price FROM Items WHERE item_code = '{selected_item_code}' LIMIT 1")
+            if item_details:
+                item_name.delete(0, END)
+                item_name.insert(0, item_details[0][0])
+                price.delete(0, END)
+                price.insert(0, item_details[0][1])
+            
+            listbox.place_forget()
+
+    def on_item_name_select(event):
+        selection = listbox.curselection()
+        if selection:
+            selected_item_name = listbox.get(selection[0])
             item_name.delete(0, END)
-            item_name.insert(0, Item_data[2])
-            price.delete(0, END)
-            price.insert(0, Item_data[3])
-            discount.delete(0, END)
-            discount.insert(0, Item_data[5])
-            gst.delete(0, END)
-            gst.insert(0, Item_data[6])
-
-            def set_focus():
-                qty.focus_set()
-                qty.delete(0, tk.END)
-
-            window.after(10, set_focus)
+            item_name.insert(0, selected_item_name)
+            
+            # Fetch item details
+            item_details = fetch_data(f"SELECT item_code, price FROM Items WHERE item_name = '{selected_item_name}' LIMIT 1")
+            if item_details:
+                item_code.delete(0, END)
+                item_code.insert(0, item_details[0][0])
+                price.delete(0, END)
+                price.insert(0, item_details[0][1])
+            
+            listbox.place_forget()
 
 
-        except IndexError:
-            # This handles the case where the selection is cleared
-            pass
-
-
-# ================================================================================================
-#  TK Window 
-# ================================================================================================
-    
+    # =============================================================================
+    #  UI Creation
+    # =============================================================================
     window = tk.Toplevel(parent)
     center_window(window, 1280, 720)
-    window.iconbitmap(generate_path("UI", "assets", "BillMates.ico"))
-    window.title("Add New Invoice")
+    window.resizable(False, False)
+    window.title("Invoice")
     window.configure(bg = "#E7EBFF")
     window.transient(parent)
     window.grab_set() 
@@ -731,7 +713,7 @@ def new_invoice_ui(parent = None):
     scrollbar.place(x=treeview_frame_x + treeview_width - 20, y=treeview_frame_y, height=treeview_height)
 
     # Create Treeview
-    columns = ("Sr No.", "Item Name", "Quantity", "Price", "Taxes", "Discount", "Subtotal", "Delete")
+    columns = ("Sr No.", "Item Name", "Quantity", "Price", "Taxes", "Discount %", "Subtotal", "Delete")
     treeview = ttk.Treeview(
         window,
         columns=columns,
@@ -747,26 +729,26 @@ def new_invoice_ui(parent = None):
     # Define custom style for the Treeview headers
     style = ttk.Style(window)
     style.configure("Treeview.Heading", font=("Arial", 10, "bold"), background="#f0f0f0")
+    style.configure("Treeview", font=("Arial", 9))
 
     # Define column headings with specific widths
-    columns = [
+    columns_config = [
         ("Sr No.", 74),
         ("Item Name", 354),
         ("Quantity", 155),
         ("Price", 150),
-        ("Discount", 127),
-        ("Taxes", 130),
+        ("Taxes", 127),
+        ("Discount %", 140),
         ("Subtotal", 160),
         ("Delete", 74)
     ]
 
     
-    for col_name, col_width in columns:
+    for col_name, col_width in columns_config:
         treeview.heading(col_name, text=col_name, anchor="center")
         treeview.column(col_name, anchor="center", width=col_width, stretch=False)
 
     
-
 
 # =====================================================================
 # All Line of Text
@@ -873,7 +855,7 @@ def new_invoice_ui(parent = None):
     )
 
     canvas.create_text(
-        822.0,
+        951.0,
         102.0,
         anchor="nw",
         text="GST (%)",
@@ -882,10 +864,10 @@ def new_invoice_ui(parent = None):
     )
     
     canvas.create_text(
-        951.0,
+        822.0,
         102.0,
         anchor="nw",
-        text="Discount (Rs.)",
+        text="Discount (%)",
         fill="#000000",
         font=("VarelaRound Regular", 12 * -1)
     )
@@ -945,7 +927,7 @@ def new_invoice_ui(parent = None):
         font=("VarelaRound Regular", 12 * -1)
     )
 
-    # Changes made __________________
+    # Summary section labels
     
     canvas.create_text(
         735.0,
@@ -1010,39 +992,7 @@ def new_invoice_ui(parent = None):
         font=("Poppins SemiBold", 14 * -1)
     )
 
-    # subtotal_txt = canvas.create_text(
-    #     830.0,
-    #     562.0,
-    #     anchor="nw",
-    #     text= "0.0",
-    #     fill="#000000",
-    #     font=("VarelaRound Regular", 20 * -1)
-    # )
-    # taxes_txt = canvas.create_text(
-    #     830.0,
-    #     597.0,
-    #     anchor="nw",
-    #     text= "0.0",
-    #     fill="#000000",
-    #     font=("VarelaRound Regular", 20 * -1)
-    # )
-    # discount_txt = canvas.create_text(
-    #     830.0,
-    #     632.0,
-    #     anchor="nw",
-    #     text= "0.0",
-    #     fill="#000000",
-    #     font=("VarelaRound Regular", 20 * -1)
-    # )
-    # total_txt = canvas.create_text(
-    #     830.0,
-    #     667.0,
-    #     anchor="nw",
-    #     text= "0.0",
-    #     fill="#000000",
-    #     font=("VarelaRound Regular", 20 * -1)
-    # )
-
+    # Summary value texts
     taxable_total_txt = canvas.create_text(
         855.0,
         548.0,
@@ -1107,7 +1057,7 @@ def new_invoice_ui(parent = None):
     )
     
 
-
+    # Customer details fields
     customer_name = ttk.Combobox(
         window, 
         values=get_client_names(), 
@@ -1228,7 +1178,7 @@ def new_invoice_ui(parent = None):
     quary = """SELECT DISTINCT item_code FROM Items;"""
     data = [row[0] for row in fetch_data(quary)]
     listbox = tk.Listbox(window, font=("VarelaRound Regular", 14 * -1), height=5)
-    SearchBox(item_code, listbox, data)
+    # SearchBox(item_code, listbox, data)
     listbox.bind('<<ListboxSelect>>', on_item_code_select)
     
     
@@ -1251,11 +1201,10 @@ def new_invoice_ui(parent = None):
     quary = """SELECT DISTINCT item_name FROM Items;"""
     data = [row[0] for row in fetch_data(quary)]
     listbox = tk.Listbox(window, font=("VarelaRound Regular", 14 * -1), height=5)
-    SearchBox(item_name, listbox, data)
+    # SearchBox(item_name, listbox, data)
     listbox.bind('<<ListboxSelect>>', on_item_name_select)
 
 
-    qty_var = tk.StringVar()
     qty = tk.Spinbox(
         window, 
         from_=0.0, 
@@ -1265,8 +1214,7 @@ def new_invoice_ui(parent = None):
         width=30, 
         validate="key",
         validatecommand=(float_validation, "%P"),
-        font=("VarelaRound Regular", 14 * -1), 
-        textvariable=qty_var
+        font=("VarelaRound Regular", 14 * -1)
     )
     qty.place(
         x=445.0,
@@ -1274,9 +1222,9 @@ def new_invoice_ui(parent = None):
         width=110.0,
         height=25.0
     )
-    qty_var.trace("w", calculate_total)
+    qty.bind("<FocusOut>", calculate_total)
+    qty.bind("<KeyRelease>", calculate_total)
 
-# Unit Feield 
     unites = ["QTY","Meter","Pieces","Inch","CM","Roll"]
     entry_9 = ttk.Combobox(window, values=unites, state="readonly", font=("VarelaRound Regular", 14 * -1))
     entry_9.current(0)
@@ -1287,7 +1235,6 @@ def new_invoice_ui(parent = None):
         height=25.0
     )
 
-    price_var = tk.StringVar()
     price = Entry(
         window,
         bd=1,
@@ -1297,8 +1244,7 @@ def new_invoice_ui(parent = None):
         highlightthickness=1,
         validate="key",
         validatecommand=(float_validation, "%P"),
-        font=("VarelaRound Regular", 14 * -1),
-        textvariable=price_var
+        font=("VarelaRound Regular", 14 * -1)
     )
     price.place(
         x=683.0,
@@ -1306,9 +1252,9 @@ def new_invoice_ui(parent = None):
         width=120.0,
         height=25.0
     )
-    price_var.trace("w", calculate_total)
+    price.bind("<FocusOut>", calculate_total)
+    price.bind("<KeyRelease>", calculate_total)
 
-    gst_var = tk.StringVar()
     gst = Entry(
         window,
         bd=1,
@@ -1318,18 +1264,18 @@ def new_invoice_ui(parent = None):
         highlightthickness=1,
         validate="key",
         validatecommand=(float_validation, "%P"),
-        font=("VarelaRound Regular", 14 * -1),
-        textvariable=gst_var
+        font=("VarelaRound Regular", 14 * -1)
     )
     gst.place(
-        x=822.0,
+        x=951.0,
         y=122.0,
         width=110.0,
         height=25.0
     )
-    gst_var.trace("w", calculate_total)
+
+    gst.bind("<FocusOut>", calculate_total)
+    gst.bind("<KeyRelease>", calculate_total)
     
-    discount_var = tk.StringVar()
     discount = Entry(window,
         bd=1,
         bg="#FFFFFF",
@@ -1338,30 +1284,28 @@ def new_invoice_ui(parent = None):
         highlightthickness=1,
         validate="key",
         validatecommand=(float_validation, "%P"),
-        font=("VarelaRound Regular", 14 * -1),
-        textvariable=discount_var
+        font=("VarelaRound Regular", 14 * -1)
     )
     discount.place(
-        x=951.0,
+        x=822.0,
         y=122.0,
         width=110.0,
         height=25.0
     )
-    discount_var.trace("w", calculate_total)
+    discount.bind("<FocusOut>", calculate_total)
+    discount.bind("<KeyRelease>", calculate_total)
 
 
 
-    item_total_var = tk.DoubleVar()
-    Total = Entry(window,
+    item_total = Entry(window,
         bd=1,
         bg="#FFFFFF",
         fg="#000000",
         highlightthickness=1,
         font=("VarelaRound Regular", 14 * -1),
-        textvariable=item_total_var,
         state="readonly"
     )
-    Total.place(
+    item_total.place(
         x=1080.0,
         y=122.0,
         width=110.0,
@@ -1395,14 +1339,12 @@ def new_invoice_ui(parent = None):
         height=25.0
     )
     
-    paid_var = tk.StringVar()
     amount_paid = Entry(window,
         bd=1,
         bg="#FFFFFF",
         fg="#000716",
         cursor="xterm",
         font=("VarelaRound Regular", 14 * -1),
-        textvariable=paid_var,
         validate="key",
         validatecommand=(float_validation, "%P"),
         highlightthickness=0
@@ -1413,7 +1355,8 @@ def new_invoice_ui(parent = None):
         width=160.0,
         height=25.0
     )
-    paid_var.trace("w", update_payment)
+    amount_paid.bind("<FocusOut>", update_payment)
+    amount_paid.bind("<KeyRelease>", update_payment)
 
     amount_remain = Entry(window,
         bd=1,

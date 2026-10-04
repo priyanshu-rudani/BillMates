@@ -14,7 +14,7 @@ import os
 from tkinter import Canvas, Entry, ttk, Button, PhotoImage, messagebox, Menu, NORMAL, END, filedialog
 from tkinter.ttk import Combobox
 from tkcalendar import DateEntry
-from utilities.inv import create_invoice
+from utilities.invoice_generator import create_invoice
 from datetime import datetime, timedelta
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, PatternFill

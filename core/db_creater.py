@@ -94,7 +94,8 @@ def create_database():
                 subtotal REAL NOT NULL, 
                 GST_Rate TEXT NOT NULL,
                 taxes REAL NOT NULL, 
-                discount REAL NOT NULL,
+                discount_amount REAL NOT NULL,
+                discount_percent REAL NOT NULL,
                 Total REAL NOT NULL,
                 FOREIGN KEY (invoice_no) REFERENCES Invoices(invoice_no),
                 FOREIGN KEY (client_id) REFERENCES Clients(id)
@@ -114,7 +115,8 @@ def create_database():
                 subtotal REAL NOT NULL, 
                 GST_Rate TEXT NOT NULL,
                 taxes REAL NOT NULL, 
-                discount REAL NOT NULL,
+                discount_amount REAL NOT NULL,
+                discount_percent REAL NOT NULL,
                 Total REAL NOT NULL,
                 FOREIGN KEY (invoice_no) REFERENCES Invoices(invoice_no),
                 FOREIGN KEY (client_id) REFERENCES Clients(id)
@@ -155,7 +157,8 @@ def create_database():
                 subtotal REAL NOT NULL, 
                 GST_Rate TEXT NOT NULL,
                 taxes REAL NOT NULL, 
-                discount REAL NOT NULL,
+                discount_amount REAL NOT NULL,
+                discount_percent REAL NOT NULL,
                 Total REAL NOT NULL,
                 FOREIGN KEY (invoice_no) REFERENCES Purchase(invoice_no),
                 FOREIGN KEY (client_id) REFERENCES Clients(id)
@@ -175,7 +178,8 @@ def create_database():
                 subtotal REAL NOT NULL, 
                 GST_Rate TEXT NOT NULL,
                 taxes REAL NOT NULL, 
-                discount REAL NOT NULL,
+                discount_amount REAL NOT NULL,
+                discount_percent REAL NOT NULL,
                 Total REAL NOT NULL,
                 FOREIGN KEY (invoice_no) REFERENCES Purchase(invoice_no),
                 FOREIGN KEY (client_id) REFERENCES Clients(id)

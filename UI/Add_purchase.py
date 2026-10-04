@@ -9,7 +9,7 @@ else:  # Running as a Python script
 sys.path.append(str(root_path))
  
 from utilities.path_utils import *
-from utilities.inv import create_invoice
+from utilities.invoice_generator import create_invoice
 import tkinter as tk
 from tkinter import ttk, Canvas, Entry, Text, Button, PhotoImage, messagebox, Scrollbar, filedialog, END
 from tkcalendar import DateEntry
@@ -93,15 +93,15 @@ def new_purchase_ui(parent = None):
             
             # get dummy table items
             items = fetch_data('''
-                SELECT rowid, item_code, item_name, quantity, unit, price, subtotal, GST_Rate, taxes, discount, Total FROM DummyPurchaseItems WHERE invoice_no = ? AND client_id = ?''', 
+                SELECT rowid, item_code, item_name, quantity, unit, price, subtotal, GST_Rate, taxes, discount_percent, discount_amount, Total FROM DummyPurchaseItems WHERE invoice_no = ? AND client_id = ?''', 
                 (i_invoice_no, i_client_id)
             )
 
             # Insert to Orignal Table
             for item in items:
                 run_query('''
-                    INSERT INTO PurchaseItems (invoice_no, client_id, item_code, item_name, quantity, unit, price, subtotal, GST_Rate, taxes, discount, Total) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ''', (i_invoice_no, i_client_id, item[1], item[2], item[3], item[4], item[5], item[6], item[7], item[8], item[9], item[10]))
+                    INSERT INTO PurchaseItems (invoice_no, client_id, item_code, item_name, quantity, unit, price, subtotal, GST_Rate, taxes, discount_percent, discount_amount, Total) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (i_invoice_no, i_client_id, item[1], item[2], item[3], item[4], item[5], item[6], item[7], item[8], item[9], item[10], item[11]))
 
 
             # Delete Dummy table data
@@ -216,7 +216,7 @@ def new_purchase_ui(parent = None):
         Clients_state = fetch_data(f"SELECT state FROM Clients WHERE id = {i_client_id}")[0][0]
 
         Sub_Total =fetch_data(f'SELECT SUM(subtotal) FROM DummyPurchaseItems WHERE invoice_no = {i_invoice_no} AND client_id = {i_client_id}')[0][0] or 0.0
-        Discount = fetch_data(f'SELECT SUM(discount) FROM DummyPurchaseItems WHERE invoice_no = {i_invoice_no} AND client_id = {i_client_id}')[0][0] or 0.0
+        Discount = fetch_data(f'SELECT SUM(discount_amount) FROM DummyPurchaseItems WHERE invoice_no = {i_invoice_no} AND client_id = {i_client_id}')[0][0] or 0.0
         Total_Taxes = fetch_data(f'SELECT SUM(taxes) FROM DummyPurchaseItems WHERE invoice_no = {i_invoice_no} AND client_id = {i_client_id}')[0][0] or 0.0
         Gross_Total = fetch_data(f'SELECT SUM(Total) FROM DummyPurchaseItems WHERE invoice_no = {i_invoice_no} AND client_id = {i_client_id}')[0][0] or 0.0
 
