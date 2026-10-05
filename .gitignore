@@ -34,3 +34,7 @@ wheels/
 
 # Database Folder
 db/
+
+# Payment QR Code
+utilities\assets\qr.png
+invoice_output.pdf

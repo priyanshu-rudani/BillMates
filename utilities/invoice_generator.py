@@ -72,6 +72,7 @@ class CompanyInfo:
 class InvoiceData:
     """Invoice and client data"""
     client_id: int
+    invoice_no_prefix: str
     invoice_no: int
     invoice_type: str
     subtotal: float
@@ -390,6 +391,7 @@ class DatabaseLoader:
         client_type = client_details[6]
         invoice_table = "Invoices" if client_type == "Client" else "Purchase"
         item_table = "InvoiceItems" if client_type == "Client" else "PurchaseItems"
+        invoice_no_prefix_value = "INV" if client_type == "Client" else "PUR"
 
         invoice_details = fetch_data(
             f"""SELECT client_id, invoice_no, Invoice_type, date, due_date, total, reference_no, remarks 
@@ -439,6 +441,7 @@ class DatabaseLoader:
 
         return InvoiceData(
             client_id=client_id,
+            invoice_no_prefix=invoice_no_prefix_value,
             invoice_no=invoice_no,
             invoice_type=invoice_details[2],
             subtotal=round(subtotal, 2),
@@ -596,7 +599,7 @@ class InvoiceRenderer:
         # Determine invoice type display text
         display_type = ("Tax Invoice" if invoice_data.invoice_type == "GST Sales"
                         else "Bill of Supply")
-        formatted_invoice_no = "INV" + str(invoice_data.invoice_no).zfill(3)
+        formatted_invoice_no = str(invoice_data.invoice_no_prefix) + str(invoice_data.invoice_no).zfill(3)
 
         self.renderer.draw_rect(
             x=449,

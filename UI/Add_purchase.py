@@ -7,1466 +7,459 @@ if getattr(sys, 'frozen', False):  # Running as a PyInstaller EXE
 else:  # Running as a Python script
     root_path = Path(__file__).parent.parent
 sys.path.append(str(root_path))
- 
+
 from utilities.path_utils import *
-from utilities.invoice_generator import create_invoice
+from services.invoice_service import (
+    InvoiceService, InvoiceError, InvoiceForm, ItemInput, PURCHASE_CONFIG, calc_item,
+)
 import tkinter as tk
 from tkinter import ttk, Canvas, Entry, Text, Button, PhotoImage, messagebox, Scrollbar, filedialog, END
 from tkcalendar import DateEntry
-import re
-from datetime import datetime, timedelta
+from services.autocomplete import AutoComplete
 
-def new_purchase_ui(parent = None):
+
+FONT_LABEL = ("VarelaRound Regular", 12 * -1)
+FONT_VALUE = ("VarelaRound Regular", 14 * -1)
+FONT_BOLD = ("Poppins SemiBold", 14 * -1)
+
+# key, label, y, font   (x: label=735, value=855)
+SUMMARY_ROWS = [
+    ("taxable", "Taxable Total", 548, FONT_BOLD),
+    ("cgst", "CGST", 574, FONT_VALUE),
+    ("sgst", "SGST", 596, FONT_VALUE),
+    ("igst", "IGST", 618, FONT_VALUE),
+    ("sub_total", "Sub Total", 640, FONT_BOLD),
+    ("round_off", "Round Off", 665, FONT_VALUE),
+    ("grand_total", "Grand Total", 685, FONT_BOLD),
+]
+
+
+def _entry(window, x, y, w, h=25, **opts):
+    """Entry with the app's default look, placed at x/y."""
+    cfg = dict(bd=1, bg="#FFFFFF", fg="#000716", cursor="xterm", font=FONT_VALUE, highlightthickness=0)
+    cfg.update(opts)
+    e = Entry(window, **cfg)
+    e.place(x=x, y=y, width=w, height=h)
+    return e
+
+
+def new_purchase_ui(parent=None):
+
+    config = PURCHASE_CONFIG
+    service = InvoiceService(config)
 
     ASSETS_PATH = Path(generate_path(root_path, "UI", "assets", "frame10"))
-    
+
     def relative_to_assets(path: str) -> Path:
         return ASSETS_PATH / Path(path)
 
+    edit_mode = {'item_id': None}  # row being edited, if any
+
     # =============================================================================
-    #  Save Invoice 
+    #  UI helpers (display only - no business logic here)
     # =============================================================================
+    def show_error(err: InvoiceError):
+        show = {"error": messagebox.showerror, "info": messagebox.showinfo,
+                "warning": messagebox.showwarning}[err.level]
+        show(err.title, err.message, parent=window)
+        if err.clear_field == "invoice_no":
+            invoice_no.delete(0, END)
 
-    def save_invoice():
-        i_invoice_no = invoice_no.get()
-        i_customer_name = customer_name.get()
-        i_invoice_type = invoice_type.get()
-        i_payment_type = payment_type.get()
-        i_date = date_entry.get()
+    def current():
+        return invoice_no.get().strip(), customer_name.get()
 
-        if not i_invoice_no:
-            messagebox.showerror("Error", "Invoice Number cannot be empty.", parent=window)
-            return
+    def set_readonly(entry, text):
+        entry.config(state='normal')
+        entry.delete(0, END)
+        entry.insert(0, text)
+        entry.config(state='readonly')
 
-        if not i_customer_name or i_customer_name == "":
-            messagebox.showerror("Error", "Supplier Name cannot be empty.", parent=window)
-            return
+    def render_summary(s=None):
+        values = {k: "0.0" for k, *_ in SUMMARY_ROWS}
+        if s is not None:
+            values = {"taxable": f"{s.taxable}", "cgst": f"{s.cgst}", "sgst": f"{s.sgst}",
+                      "igst": f"{s.igst}", "sub_total": f"{s.sub_total:.2f}",
+                      "round_off": f"{s.round_off}", "grand_total": f"{s.grand_total}"}
+        for key, text in values.items():
+            canvas.itemconfig(summary_txt[key], text=text)
 
-        if not i_date:
-            messagebox.showerror("Missing Data", "Date is required.", parent=window)
-            return
+    def refresh_summary():
+        render_summary(service.summary(customer_name.get()))
 
-        inv_date = datetime.strptime(i_date, "%d/%m/%Y")
-        i_due_date = inv_date + timedelta(days=30)
-
-        inv_date = inv_date.strftime("%d/%m/%Y")
-        i_due_date = i_due_date.strftime("%d/%m/%Y")
-
-        try:
-            i_total = get_total_for_invoice(i_invoice_no)
-            i_paid = float(amount_paid.get()) if amount_paid.get() else 0.0
-        except ValueError:
-            messagebox.showerror("Invalid Input", "Please enter valid paid amount.", parent=window)
-            return
-    
-        i_remarks = remark.get("1.0", tk.END).strip() if remark.get("1.0", tk.END).strip() else " "
-        i_reference_no = Reference_no.get() if Reference_no.get() else " "
-        i_remaining = i_total - i_paid
-    
-        def is_paid(remain, total):
-            if remain == 0:
-                return "Paid"
-            elif remain > 0 and remain == total:
-                return "Unpaid"
-            elif remain > 0 and remain != total:
-                return "Partially Paid"
-
-        Total_Items = fetch_data("SELECT COUNT(*) FROM DummyInvoiceItems;")[0][0]
-        if Total_Items <= 0:
-            messagebox.showinfo("Save Error", f"Enter at least 1 Item to save the Invoice", parent=window)
-            return
-
-        if i_invoice_no.strip() == '0':
-            messagebox.showinfo("Invoice No Error", "Invoice number Can not be 0", parent=window)
-            invoice_no.delete(0, 'end')
-            return
-        
-    
-        result = fetch_data("""SELECT COUNT(*) FROM Purchase WHERE invoice_no = ? AND client_id = (SELECT id FROM Clients WHERE name = ? )
-        """, (i_invoice_no, i_customer_name))
-
-        if result[0][0] > 0:
-            messagebox.showinfo("Invoice Exists", f"Invoice number {i_invoice_no} already exists.", parent=window)
-
-        else:
-            i_client_id = get_client_id(i_customer_name)
-            
-            # get dummy table items
-            items = fetch_data('''
-                SELECT rowid, item_code, item_name, quantity, unit, price, subtotal, GST_Rate, taxes, discount_percent, discount_amount, Total FROM DummyPurchaseItems WHERE invoice_no = ? AND client_id = ?''', 
-                (i_invoice_no, i_client_id)
-            )
-
-            # Insert to Orignal Table
-            for item in items:
-                run_query('''
-                    INSERT INTO PurchaseItems (invoice_no, client_id, item_code, item_name, quantity, unit, price, subtotal, GST_Rate, taxes, discount_percent, discount_amount, Total) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ''', (i_invoice_no, i_client_id, item[1], item[2], item[3], item[4], item[5], item[6], item[7], item[8], item[9], item[10], item[11]))
-
-
-            # Delete Dummy table data
-            run_query('''
-                DELETE FROM DummyPurchaseItems WHERE invoice_no = ? AND client_id = ?
-                ''', (i_invoice_no, i_client_id))
-            
-            
-            run_query('''
-                INSERT INTO Purchase (invoice_no, Invoice_type, date, due_date, client_id, total, paid, remaining, remarks, reference_no, payment_type, paid_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''', 
-                (i_invoice_no, i_invoice_type, i_date, i_due_date, i_client_id, i_total, i_paid, i_remaining, i_remarks, i_reference_no, i_payment_type, is_paid(i_remaining, i_total),
-            ))
-
-
-            Current_Balance = fetch_data(f"""SELECT closing_bal FROM Clients WHERE id = {i_client_id}""")[0][0]
-
-            Closing_Balance = Current_Balance - i_total
-
-            run_query(f"""UPDATE Clients SET closing_bal = {float(Closing_Balance)} WHERE id = {i_client_id}""")
-
-            if i_paid > 0:
-                run_query("""
-                    INSERT INTO Payments (entity_id, entity_type, date, total_amount, payment_mode, reference_no, Expanse_type)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                """, (i_client_id, "Expense", i_date, i_paid, i_payment_type, i_invoice_no, 'Payment For Purchase'))         
-
-            
-            messagebox.showinfo("Invoice Saved", f"Invoice {i_invoice_no} has been saved successfully.", parent=window)
-
-            for row in treeview.get_children():
-                treeview.delete(row)
-
-            canvas.itemconfig(taxable_total_txt, text="0")
-            canvas.itemconfig(CGST_txt, text="0.0")
-            canvas.itemconfig(SGST_txt, text="0.0")
-            canvas.itemconfig(IGST_txt, text="0.0")
-            canvas.itemconfig(sub_total_txt, text="0.0")
-            canvas.itemconfig(round_off_txt, text="0.0")
-            canvas.itemconfig(grand_total_txt, text="0.0")
-
-            customer_name.config(state='normal')
-
-            # Clear form fields
-            invoice_no.delete(0, tk.END)
-            customer_name.set('')
-            payment_type.delete(0, tk.END)
-            date_entry.delete(0, tk.END)
-            contect_no.delete(0, tk.END)
-            gst_no.delete(0, tk.END)
-            amount_paid.delete(0, tk.END)
-            remark.delete(1.0, tk.END)
-            Reference_no.delete(0, tk.END)
-
-    def get_total_for_invoice(invoice_no):
-        i_customer_name = customer_name.get()
-        i_client_id = get_client_id(i_customer_name)
-    
-        total = fetch_data('''
-            SELECT SUM(Total) FROM DummyPurchaseItems WHERE invoice_no = ? AND client_id = ?
-        ''', (invoice_no, i_client_id))
-    
-        return total[0][0] if total[0][0] is not None else 0.0
-    
-    def cleanup_unsaved_items(invoice_no):
-        i_customer_name = customer_name.get()
-        i_client_id = get_client_id(i_customer_name)
-
-        try:
-            # Check if the invoice exists in the Purchase table
-            result = fetch_data('SELECT COUNT(*) FROM Purchase WHERE invoice_no = ? AND client_id = ?', (invoice_no, i_client_id))
-            invoice_exists = result[0][0] > 0
-
-            if not invoice_exists:
-                # Delete unsaved items from the DummyPurchaseItems table if the invoice does not exist
-                run_query('DELETE FROM DummyPurchaseItems WHERE invoice_no = ? AND client_id = ?', (invoice_no, i_client_id))
-
-        except Exception as e:
-            messagebox.showerror("Invoice Cleanup", f"Error: {e}", parent=window)
-
-    def on_close(*args):
-        i_invoice_no = invoice_no.get()
-        if messagebox.askyesno("Exit Confirmation", "Are you sure you want to Close?", parent=window):
-            cleanup_unsaved_items(i_invoice_no)
-            Top_Close(window, parent)
-    
-    def calculate_total(*args):
-        try:
-            # Get the values from the input fields
-            v_qty = float(qty_var.get() or 0)
-            v_price = float(price_var.get() or 0)
-            v_gst_rate = float(gst_var.get() or 0)
-            v_discount = float(discount_var.get() or 0)
-    
-            # Calculate the total
-            subtotal = (v_qty * v_price)
-            gst_amount = (subtotal * v_gst_rate) / 100
-            itemTotal = (subtotal + gst_amount) - v_discount
-    
-            # Update the total entry field
-            item_total_var.set(f"{itemTotal:.2f}")
-
-        except ValueError:
-            # Handle any conversion errors
-            item_total_var.set("Error")
-
-    def update_value():
-        i_invoice_no = invoice_no.get()
-        i_customer_name = customer_name.get()
-        i_client_id = get_client_id(i_customer_name)
-
-        Compney_state = read_ini("PROFILE", "state")
-        Clients_state = fetch_data(f"SELECT state FROM Clients WHERE id = {i_client_id}")[0][0]
-
-        Sub_Total =fetch_data(f'SELECT SUM(subtotal) FROM DummyPurchaseItems WHERE invoice_no = {i_invoice_no} AND client_id = {i_client_id}')[0][0] or 0.0
-        Discount = fetch_data(f'SELECT SUM(discount_amount) FROM DummyPurchaseItems WHERE invoice_no = {i_invoice_no} AND client_id = {i_client_id}')[0][0] or 0.0
-        Total_Taxes = fetch_data(f'SELECT SUM(taxes) FROM DummyPurchaseItems WHERE invoice_no = {i_invoice_no} AND client_id = {i_client_id}')[0][0] or 0.0
-        Gross_Total = fetch_data(f'SELECT SUM(Total) FROM DummyPurchaseItems WHERE invoice_no = {i_invoice_no} AND client_id = {i_client_id}')[0][0] or 0.0
-
-        Taxable_Amount = float(Sub_Total) - float(Discount)
-        Total = Taxable_Amount + float(Total_Taxes)
-
-        if Compney_state == Clients_state:
-            Central_Tax = State_Tax = float(Total_Taxes) / 2
-            Integrated_Tax = 0.0
-        else: 
-            Integrated_Tax = float(Total_Taxes)
-            Central_Tax = State_Tax = 0.0
-
-        Round_Off = round(Total) - float(Gross_Total)
-        Grand_Total = Total + Round_Off
-
-        Taxable_Amount = round(float(Taxable_Amount), 2)
-        Central_Tax = round(float(Central_Tax), 2)
-        State_Tax = round(float(State_Tax), 2)
-        Integrated_Tax = round(float(Integrated_Tax), 2)
-        Total = round(float(Total), 2)
-        Round_Off = round(float(Round_Off), 2)
-        Grand_Total = round(float(Grand_Total), 2)
-
-        canvas.itemconfig(taxable_total_txt, text=Taxable_Amount)
-        canvas.itemconfig(CGST_txt, text=Central_Tax)
-        canvas.itemconfig(SGST_txt, text=State_Tax)
-        canvas.itemconfig(IGST_txt, text=Integrated_Tax)
-        canvas.itemconfig(sub_total_txt, text=Total)
-        canvas.itemconfig(round_off_txt, text=Round_Off)
-        canvas.itemconfig(grand_total_txt, text=Grand_Total)
-
-    # ========================================================================
-    # Add Invoice and Update Tree view
-    # ========================================================================
-
-    def add_treeview(invoice_no):
-        i_customer_name = customer_name.get()
-        i_client_id = get_client_id(i_customer_name)
-        # Clear any existing rows in the Treeview
+    def refresh_treeview():
         for row in treeview.get_children():
             treeview.delete(row)
+        for idx, r in enumerate(service.draft_items(), start=1):
+            label = f"{r.item_name} ({r.item_code})" if r.item_code else r.item_name
+            gst_txt = f"{r.gst_rate}% ({r.taxes})" if r.taxes != 0 else "0"
+            disc_txt = f"{r.discount_percent}% (₹{r.discount_amount})" if r.discount_percent > 0 else "0"
+            treeview.insert("", "end", iid=r.row_id,
+                            values=(idx, label, f"{r.qty} [{r.unit}]", r.price, gst_txt, disc_txt, r.total, "X"))
 
-        # Fetch data from the database
-        rows = fetch_data('''
-            SELECT rowid, item_code, item_name, quantity, unit, price, GST_Rate, taxes, discount, Total 
-            FROM DummyPurchaseItems 
-            WHERE invoice_no = ? AND client_id = ?
-        ''', (invoice_no, i_client_id))
-
-        # Populate Treeview with data
-        for idx, row in enumerate(rows, start=1):  # Add Sr No.
-
-            item_id = row[0]
-            if not row[1] or row[1] == "":
-                item_name = row[2]
-            else: 
-                item_name = f"{row[2]} ({row[1]})"
-            quantity = f"{row[3]} [{row[4]}]"
-            price = row[5]
-            gst = f"{row[6]}% ({row[7]})" if row[7] != 0 else "0"
-            discount = row[8]
-            Total = row[9]
-
-            # Insert data into Treeview including Delete column
-            treeview.insert("", "end", iid=item_id, values=(idx, item_name, quantity, price, gst, discount, Total, "X"))
-
-        # Bind keyboard delete functionality
-        treeview.bind("<Delete>", delete_item)
-        treeview.bind("<Double-1>", on_treeview_double_click)
-        treeview.bind("<Button-1>", on_treeview_button_click)
-
-    edit_mode = {'item_id': None}  # To track if we are editing an item
-
-    def on_treeview_double_click(event):
-        # Detect row and column clicked
-        row_id = treeview.identify_row(event.y)
-        col_id = treeview.identify_column(event.x)
-
-        if row_id and col_id != "#8":  # Exclude Delete column
-            selected_item = row_id
-            item_values = treeview.item(selected_item, 'values')
-
-            gst_string = item_values[4]  # Example input
-            match = re.search(r"(\d+(\.\d*)?)%", gst_string)  # Extract digits before %
-            if match:
-                gst_value = match.group(1)  # Extract matched digits
-            else:
-                gst_value = "0"  # Default to "0" if no match found
-
-
-            qty_string = item_values[2]
-            qmatch = re.search(r"(\d+(\.\d+)?)\s*\[", qty_string)
-            if qmatch:
-                qty_value = qmatch.group(1)  # Extract matched digits
-            else:
-                qty_value = "0"
-
-
-            # Populate entry fields with selected item values
-            item_name.delete(0, END)
-            qty.delete(0, END)
-            price.delete(0, END)
-            gst.delete(0, END)
-            discount.delete(0, END)
-
-            item_name.insert(0, item_values[1])
-            qty.insert(0, qty_value)
-            price.insert(0, item_values[3])
-            gst.insert(0, gst_value)
-            discount.insert(0, item_values[5])
-
-            # Save current selected item ID for update
-            edit_mode['item_id'] = selected_item
-
-    def on_treeview_button_click(event):
-        # Detect row and column clicked
-        region = treeview.identify_region(event.x, event.y)
-        row_id = treeview.identify_row(event.y)
-        col_id = treeview.identify_column(event.x)
-
-        if region == "cell" and col_id == "#8":  # Delete button column
-            treeview.selection_set(row_id)  # Ensure the row is selected
-            delete_item()
-
-    def update_item(selected_item):
-        try:
-            # Get updated values from entry fields
-            updated_item_code = item_code.get()
-            updated_item_name = item_name.get()
-            updated_unit = entry_9.get()
-            updated_qty = round(float(qty.get()), 2) if qty.get() else 0
-            updated_price = round(float(price.get()), 2) if price.get() else 0
-            updated_gst_rate = round(float(gst.get()), 2) if gst.get() else 0
-            updated_discount = round(float(discount.get()), 2) if discount.get() else 0
-
-            updated_subtotal = round((updated_qty * updated_price), 2)
-            gst_amount = round(((updated_subtotal * updated_gst_rate) / 100), 2)
-            updated_total = round(((updated_subtotal + gst_amount) - updated_discount), 2)
-
-            # Update the database
-            run_query('''
-                UPDATE DummyPurchaseItems 
-                SET item_code = ?, item_name = ?, quantity = ?, unit = ?, price = ?, subtotal = ?, GST_Rate = ?, taxes = ?, discount = ?, Total = ?
-                WHERE rowid = ?
-            ''', (updated_item_code, updated_item_name, updated_qty, updated_unit, updated_price, updated_subtotal, updated_gst_rate, gst_amount, updated_discount, updated_total, selected_item))
-
-            treeview.item(selected_item, values=(
-                treeview.index(selected_item) + 1,
-                f"{updated_item_name} ({updated_item_code})",
-                f"{updated_qty} ({updated_unit})",
-                updated_price,
-                f"{updated_gst_rate}% ({gst_amount})",
-                updated_discount,
-                updated_total,
-                "X"
-            ))
-
-            messagebox.showinfo("Item Updated", "Item has been updated successfully.", parent=window)
-            edit_mode['item_id'] = None  # Exit edit mode
-
-        except ValueError:
-            messagebox.showerror("Invalid Input", "Please enter valid data for the item fields.", parent=window)
-        except Exception as e:
-            messagebox.showerror("Error", str(e), parent=window)
-
-    def delete_item(event=None):
-        # Get selected item
-        selected_item = treeview.selection()
-        if selected_item:
-            # Confirm deletion
-            confirm = messagebox.askyesno("Delete Item", "Are you sure you want to delete this item?", parent=window)
-            if confirm:
-                try:
-                    # Remove item from the database
-                    run_query('''
-                        DELETE FROM DummyPurchaseItems WHERE rowid = ?
-                    ''', (selected_item[0],))
-
-                    # Remove item from the Treeview
-                    treeview.delete(selected_item)
-                    messagebox.showinfo("Item Deleted", "Item has been deleted successfully.", parent=window)
-                except Exception as e:
-                    messagebox.showerror("Error", str(e), parent=window)
-        else:
-            messagebox.showwarning("No Selection", "Please select an item to delete.", parent=window)
-
-    def check_invoice_exists(i_invoice_no, i_customer_name):
-
-        result = fetch_data("""SELECT COUNT(*) FROM Purchase WHERE invoice_no = ? AND client_id = (SELECT id FROM Clients WHERE name = ? )
-        """, (i_invoice_no, i_customer_name))
-
-        if result[0][0] > 0:
-            messagebox.showinfo("Invoice Exists", f"Invoice number already exists.", parent=window)
-            
-            invoice_no.delete(0, 'end')
-            return
-        
-    def add_item():
-        i_invoice_no = invoice_no.get().strip()
-        i_customer_name = customer_name.get()
-        i_date = date_entry.get()
-
-        if not i_invoice_no:
-            messagebox.showerror("Missing Invoice Number", "Please enter an Invoice Number before adding items.", parent=window)
-            return
-        
-        if not i_customer_name:
-            messagebox.showerror("Error", "Supplier Name cannot be empty.", parent=window)
-            return
-        
-        if not i_date:
-            messagebox.showerror("Missing Data", "Date is required.", parent=window)
-            return
-        
-        if i_invoice_no.strip() == '0':
-            messagebox.showinfo("Invoice No Error", f"Invoice number Can not be 0", parent=window)
-            invoice_no.delete(0, 'end')
-            return
-        
-        Total_Items = fetch_data("SELECT COUNT(*) FROM DummyInvoiceItems;")[0][0]
-
-        if Total_Items >= 15:
-            messagebox.showinfo("Max Limit Reached", f"You can't add more then 15 items per invoice", parent=window)
-            return
-
-        # Get item details
-        i_item_code = item_code.get()
-        i_item_name = item_name.get()
-        i_unit = entry_9.get()
-        i_discount = round(float(discount.get()), 2) if discount.get() else 0.0
-        try:
-            i_gst_rate = round(float(gst.get()), 2) if gst.get() else 0
-            
-            i_qty = round(float(qty.get()), 2)
-            i_price = round(float(price.get()), 2)
-        except ValueError:
-            messagebox.showerror("Invalid Input", "Please enter valid quantity and price.", parent=window)
-            return
-
-        # Calculate subtotal
-        i_subtotal = round((i_qty * i_price), 2)
-        gst_amount = round((i_subtotal * i_gst_rate) / 100, 2)
-        final_total = round(((i_subtotal + gst_amount) - i_discount), 2)
-
-
-        if edit_mode['item_id']:
-            update_item(edit_mode['item_id'])
-        else:
-            i_client_id = get_client_id(i_customer_name)
-
-            # Add new item to the dummy table
-            run_query('''
-                INSERT INTO DummyPurchaseItems (invoice_no, client_id , item_code, item_name, quantity, unit, price, subtotal, GST_Rate, taxes, discount, Total)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (i_invoice_no, i_client_id , i_item_code, i_item_name, i_qty, i_unit, i_price, i_subtotal, i_gst_rate, gst_amount, i_discount, final_total))
-
-
-        update_value()
-
-        if not amount_paid.get() or amount_paid.get() == "":
-            amount_paid.delete(0, END)
-            amount_paid.insert(0,"0")
-            update_payment()
-        else:
-            update_payment()
-    
-        add_treeview(i_invoice_no)
-        customer_name.config(state='disabled')
-
-        # Clear fields and exit edit mode
+    def clear_item_fields():
         item_code.delete(0, END)
         item_name.delete(0, END)
-        qty.delete(0, END)
-        qty.insert(0, "0")
-        price.delete(0, END)
-        price.insert(0, "0")
-        gst.delete(0, END)
-        gst.insert(0, "0")
-        discount.delete(0, END)
-        discount.insert(0, "0")
+        for w in (qty, price, gst, discount):
+            w.delete(0, END)
+            w.insert(0, "0")
         edit_mode['item_id'] = None
         item_code.focus_set()
 
-
-    def get_client_names():
+    # =============================================================================
+    #  Handlers
+    # =============================================================================
+    def calculate_total(*args):
         try:
-            # Fetch names of all clients where client_type is 'Supplier'
-            result = fetch_data("SELECT name FROM Clients WHERE client_type = 'Supplier'")
-            clients = [row[0] for row in result]
-            return clients
+            a = calc_item(float(qty.get() or 0), float(price.get() or 0),
+                          float(gst.get() or 0), float(discount.get() or 0))
+            set_readonly(item_total, f"{a.total:.2f}")
+        except ValueError:
+            set_readonly(item_total, "Error")
+
+    def update_payment(*args):
+        try:
+            set_readonly(amount_remain, f"{service.remaining(amount_paid.get()):.2f}")
+        except ValueError:
+            set_readonly(amount_remain, "")
+
+    def add_item():
+        inv, name = current()
+        item = ItemInput(item_code.get(), item_name.get(), entry_9.get(),
+                         qty.get(), price.get(), gst.get(), discount.get())
+        try:
+            action = service.save_item(inv, name, date_entry.get(), item, edit_mode['item_id'])
+        except InvoiceError as err:
+            show_error(err)
+            return
         except Exception as e:
-            messagebox.showinfo("Error", f"Error fetching Supplier names: {e}", parent=window)
-            return []
+            messagebox.showerror("Error", str(e), parent=window)
+            return
 
-    def on_client_selected(event):
-        selected_client = customer_name.get()
-        client_id = get_client_id(selected_client)
-        if selected_client:
-            try:
-                invoice_no.delete(0, 'end')
-                gst_no.delete(0, 'end')
-                contect_no.delete(0, 'end')
+        if action == "updated":
+            messagebox.showinfo("Item Updated", "Item has been updated successfully.", parent=window)
 
-                # Fetch data for the selected Supplier
-                client_data = fetch_data("SELECT * FROM Clients WHERE client_type = 'Supplier' AND name = ?", (selected_client,))
+        refresh_summary()
+        if not amount_paid.get():
+            amount_paid.insert(0, "0")
+        update_payment()
+        refresh_treeview()
+        customer_name.config(state='disabled')
+        clear_item_fields()
 
-                result = fetch_data('''SELECT MAX(invoice_no) FROM Purchase WHERE client_id = ?''', (client_id,))
-                
-                if not result[0] or result[0][0] is None:
-                    db_invoice_no = 1
-                else:
-                    db_invoice_no = result[0][0] + 1
+    def delete_item(event=None):
+        selected = treeview.selection()
+        if not selected:
+            messagebox.showwarning("No Selection", "Please select an item to delete.", parent=window)
+            return
+        if not messagebox.askyesno("Delete Item", "Are you sure you want to delete this item?", parent=window):
+            return
+        try:
+            service.delete_item(selected[0])
+            if edit_mode['item_id'] == selected[0]:
+                edit_mode['item_id'] = None
+            refresh_treeview()
+            messagebox.showinfo("Item Deleted", "Item has been deleted successfully.", parent=window)
+            refresh_summary()
+            update_payment()
+        except Exception as e:
+            messagebox.showerror("Error", str(e), parent=window)
 
-                Number = "00+ 00000 00000"
+    def on_treeview_double_click(event):
+        row_id = treeview.identify_row(event.y)
+        col_id = treeview.identify_column(event.x)
+        if not row_id or col_id == "#8":  # ignore Delete column
+            return
+        r = service.get_draft_item(row_id)
+        if not r:
+            return
+        for w, val in ((item_code, r.item_code), (item_name, r.item_name), (qty, r.qty),
+                       (price, r.price), (gst, r.gst_rate), (discount, r.discount_percent)):
+            w.delete(0, END)
+            w.insert(0, val)
+        entry_9.set(r.unit)
+        calculate_total()
+        edit_mode['item_id'] = row_id
 
-                if len(client_data[0][2]) == 10:
-                    Number = f"91+ {client_data[0][2][:5]} {client_data[0][2][5:]}"
-                    
-                if client_data:
-                    # Assuming columns are in order: id, name, contact_no, gst, city, state, client_type
-                    contect_no.insert(0, Number)
-                    gst_no.insert(0, client_data[0][3])
-                    invoice_no.insert(0, db_invoice_no)
+    def on_treeview_button_click(event):
+        if treeview.identify_region(event.x, event.y) == "cell" and treeview.identify_column(event.x) == "#8":
+            treeview.selection_set(treeview.identify_row(event.y))
+            delete_item()
 
-            except Exception as e:
-                messagebox.showinfo("Error", f"Error fetching Supplier Data: {e}", parent=window)
+    def reset_form():
+        for row in treeview.get_children():
+            treeview.delete(row)
+        render_summary(None)
+        customer_name.config(state='readonly')
+        invoice_no.delete(0, END)
+        customer_name.set('')
+        payment_type.delete(0, END)
+        date_entry.delete(0, END)
+        contect_no.delete(0, END)
+        gst_no.delete(0, END)
+        amount_paid.delete(0, END)
+        set_readonly(amount_remain, "")
+        remark.delete(1.0, END)
+        Reference_no.delete(0, END)
+        edit_mode['item_id'] = None
+
+    def save_invoice():
+        """Returns True when invoice is saved or already exists, False on failure."""
+        form = InvoiceForm(invoice_no.get(), customer_name.get(), invoice_type.get(),
+                           payment_type.get(), date_entry.get(), amount_paid.get(),
+                           remark.get("1.0", END), Reference_no.get())
+        try:
+            result = service.save_invoice(form)
+        except InvoiceError as err:
+            show_error(err)
+            return False
+        except Exception as e:
+            messagebox.showerror("Save Error", str(e), parent=window)
+            return False
+
+        messagebox.showinfo(result.title, result.message, parent=window)
+        if result.status == "saved":
+            reset_form()
+        return result.ok
 
     def export_invoice():
-        inv = invoice_no.get()
-        i_customer_name = customer_name.get()
-        i_date = date_entry.get()
-        id = get_client_id(str(i_customer_name))
-
-        if not inv or inv == "":
-            messagebox.showerror("Error", "Invoice Number cannot be empty.", parent=window)
+        inv, name = current()
+        try:
+            target = service.prepare_export(inv, name, date_entry.get())
+        except InvoiceError as err:
+            show_error(err)
             return
 
-        if inv.strip() == '0':
-            messagebox.showinfo("Invoice No Error", "Invoice number Can not be 0")
-            invoice_no.delete(0, 'end')
-            return
-        
-        if not i_customer_name or i_customer_name == "":
-            messagebox.showerror("Error", "Supplier Name cannot be empty.", parent=window)
-            return
-
-        if not i_date:
-            messagebox.showerror("Missing Data", "Date is required.", parent=window)
-            return
-        
-        if id == 0:
-            messagebox.showerror("Missing Data", "Supplier Id not found from name", parent=window)
-            return 
-        
-        display_Inv_no = "INV" + str(inv).zfill(3)
-
-        inv_date = datetime.strptime(i_date, "%d/%m/%Y")
-        safe_date = inv_date.strftime("%d-%m-%Y")
-
-        filename = f"{display_Inv_no}_{safe_date}_{i_customer_name}.pdf"
         file_path = filedialog.asksaveasfilename(
             title="Save PDF At",
-            initialfile=filename,
-            defaultextension=".pdf",  # Set the default extension
+            initialfile=target.filename,
+            defaultextension=".pdf",
             filetypes=[("PDF Files", "*.pdf")],
             parent=window
         )
+        if not file_path:
+            return
+        if not save_invoice():
+            return
 
-        if file_path:
-            save_invoice()
-            create_invoice(id, inv, file_path)
+        service.generate_pdf(target.client_id, target.invoice_no, file_path)
+        if not os.path.exists(file_path):
+            messagebox.showerror("Export error", "Failed to Generate PDF", parent=window)
+            return
+        if messagebox.askquestion("Invoice Saved", f"Invoice saved at {file_path} \nDo you want to open the PDF?",
+                                  parent=window) == 'yes':
+            os.startfile(file_path)
 
-            if not os.path.exists(file_path):
-                messagebox.showerror("Export error", "Failed to Generate PDF", parent=window)
-                return
-            else:
-                response = messagebox.askquestion("Invoice Saved", f"Invoice saved at {file_path} \nDo you want to open the PDF?", parent=window)
-                if response == 'yes':
-                    os.startfile(file_path)
-
-
-    def update_payment(*args):
-        i_invoice_no = invoice_no.get()
-        i_customer_name = customer_name.get()
-        i_client_id = get_client_id(i_customer_name)
-
-        query = f"""SELECT SUM(Total) FROM DummyPurchaseItems WHERE invoice_no = ? AND client_id = ?"""
-        result = fetch_data(query, (i_invoice_no, i_client_id))
-
-        Total = result[0][0] if result and result[0][0] is not None else 0
-
-        paid = amount_paid.get() 
-        if paid:
-            Remain = float(Total) - float(paid)
-            Remain = round(Remain, 2)
-        elif paid == 0 or paid == "":
-            Remain = round(float(Total), 2)
-        else:
-            Remain = "Error"
-
-        amount_remain.config(state="normal")
-        amount_remain.delete(0, END)
-        amount_remain.insert(0, Remain)
-        amount_remain.config(state="readonly")
-
-        
-
-
-# ================================================================================================
-#  TK Window 
-# ================================================================================================
-    
-    window = tk.Toplevel(parent)
-    window.focus()
-    center_window(window, 1280, 720)
-    window.iconbitmap(generate_path("UI", "assets", "BillMates.ico"))
-    window.transient(parent)
-    window.grab_set() 
-    window.title("Add New Purchase")
-    window.configure(bg = "#E7EBFF")
-
-    canvas = Canvas(
-        window,
-        bg = "#E7EBFF",
-        height = 720,
-        width = 1280,
-        bd = 0,
-        highlightthickness = 0,
-        relief = "ridge"
-    )
-    
-    canvas.place(x = 0, y = 0)
-
-    float_validation = window.register(lambda value: value == "" or value.replace(".", "", 1).isdigit())
-
-# =====================================================================
-# List View of added items
-# =====================================================================
-
-    # Define Treeview frame and dimensions
-    treeview_frame_x = 20
-    treeview_frame_y = 168
-    treeview_width = 1230
-    treeview_height = 368
-
-    # Add Scrollbar
-    scrollbar = Scrollbar(window, orient="vertical")
-    scrollbar.place(x=treeview_frame_x + treeview_width - 20, y=treeview_frame_y, height=treeview_height)
-
-    # Create Treeview
-    columns = ("Sr No.", "Item Name", "Quantity", "Price", "Taxes", "Discount", "Subtotal", "Delete")
-    treeview = ttk.Treeview(
-        window,
-        columns=columns,
-        show="headings",
-        yscrollcommand=scrollbar.set,
-        height=16,
-        style="Treeview.Heading"
-    )
-    treeview.place(x=treeview_frame_x, y=treeview_frame_y, width=treeview_width, height=treeview_height)
-
-    scrollbar.config(command=treeview.yview)
-
-    # Define custom style for the Treeview headers
-    style = ttk.Style(window)
-    style.configure("Treeview.Heading", font=("Arial", 10, "bold"), background="#f0f0f0")
-
-    # Define column headings with specific widths
-    columns = [
-        ("Sr No.", 74),
-        ("Item Name", 354),
-        ("Quantity", 155),
-        ("Price", 150),
-        ("Discount", 127),
-        ("Taxes", 130),
-        ("Subtotal", 160),
-        ("Delete", 74)
-    ]
-
-    
-    for col_name, col_width in columns:
-        treeview.heading(col_name, text=col_name, anchor="center")
-        treeview.column(col_name, anchor="center", width=col_width, stretch=False)
-
-
-# =====================================================================
-# All Line of Text
-# =====================================================================
-    
-    canvas.create_text(
-        27.0,
-        28.0,
-        anchor="nw",
-        text="Supplier Name",
-        fill="#000000",
-        font=("VarelaRound Regular", 12 * -1)
-    )
-    
-    canvas.create_text(
-        262.0,
-        28.0,
-        anchor="nw",
-        text="Supplier No.",
-        fill="#000000",
-        font=("VarelaRound Regular", 12 * -1)
-    )
-    
-    canvas.create_text(
-        467.0,
-        28.0,
-        anchor="nw",
-        text="Invoice No.",
-        fill="#000000",
-        font=("VarelaRound Regular", 12 * -1)
-    )
-    
-    canvas.create_text(
-        662.0,
-        28.0,
-        anchor="nw",
-        text="Invoice Date",
-        fill="#000000",
-        font=("VarelaRound Regular", 12 * -1)
-    )
-
-    canvas.create_text(
-        877.0,
-        28.0,
-        anchor="nw",
-        text="Invoice Type",
-        fill="#000000",
-        font=("VarelaRound Regular", 12 * -1)
-    )
-    
-    canvas.create_text(
-        1022.0,
-        28.0,
-        anchor="nw",
-        text="Supplier GST No.",
-        fill="#000000",
-        font=("VarelaRound Regular", 12 * -1)
-    )
-    
-    canvas.create_text(
-        27.0,
-        102.0,
-        anchor="nw",
-        text="HSN Code",
-        fill="#000000",
-        font=("VarelaRound Regular", 12 * -1)
-    )
-    
-    canvas.create_text(
-        166.0,
-        102.0,
-        anchor="nw",
-        text="Item Name",
-        fill="#000000",
-        font=("VarelaRound Regular", 12 * -1)
-    )
-    
-    canvas.create_text(
-        445.0,
-        102.0,
-        anchor="nw",
-        text="Quantity ",
-        fill="#000000",
-        font=("VarelaRound Regular", 12 * -1)
-    )
-
-    canvas.create_text(
-        574.0,
-        102.0,
-        anchor="nw",
-        text="Unit",
-        fill="#000000",
-        font=("VarelaRound Regular", 12 * -1)
-    )
-    
-    
-    canvas.create_text(
-        683.0,
-        102.0,
-        anchor="nw",
-        text="Sale Price",
-        fill="#000000",
-        font=("VarelaRound Regular", 12 * -1)
-    )
-
-    canvas.create_text(
-        822.0,
-        102.0,
-        anchor="nw",
-        text="GST (%)",
-        fill="#000000",
-        font=("VarelaRound Regular", 12 * -1)
-    )
-    
-    canvas.create_text(
-        951.0,
-        102.0,
-        anchor="nw",
-        text="Discount (Rs.)",
-        fill="#000000",
-        font=("VarelaRound Regular", 12 * -1)
-    )
-    
-    canvas.create_text(
-        1080.0,
-        102.0,
-        anchor="nw",
-        text="Item Total",
-        fill="#000000",
-        font=("VarelaRound Regular", 12 * -1)
-    )
-    
-    canvas.create_text(
-        28.0,
-        552.0,
-        anchor="nw",
-        text="Reference No. ",
-        fill="#000000",
-        font=("VarelaRound Regular", 12 * -1)
-    )
-
-    canvas.create_text(
-        28.0,
-        607.0,
-        anchor="nw",
-        text="Remarks",
-        fill="#000000",
-        font=("VarelaRound Regular", 12 * -1)
-    )
-
-        
-    canvas.create_text(
-        303.0,
-        556.0,
-        anchor="nw",
-        text="Payment Type",
-        fill="#000000",
-        font=("VarelaRound Regular", 12 * -1)
-    )
-    
-    canvas.create_text(
-        303.0,
-        605.0,
-        anchor="nw",
-        text="Payment Amount",
-        fill="#000000",
-        font=("VarelaRound Regular", 12 * -1)
-    )
-
-    canvas.create_text(
-        303.0,
-        655.0,
-        anchor="nw",
-        text="Remaining Amount ",
-        fill="#000000",
-        font=("VarelaRound Regular", 12 * -1)
-    )
-
-    # Changes made __________________
-    
-    canvas.create_text(
-        735.0,
-        548.0,
-        anchor="nw",
-        text="Taxable Total",
-        fill="#000000",
-        font=("Poppins SemiBold", 14 * -1)
-    )
-
-    canvas.create_text(
-        735.0,
-        574.0,
-        anchor="nw",
-        text="CGST",
-        fill="#000000",
-        font=("VarelaRound Regular", 14 * -1)
-    )
-
-    canvas.create_text(
-        735.0,
-        596.0,
-        anchor="nw",
-        text="SGST",
-        fill="#000000",
-        font=("VarelaRound Regular", 14 * -1)
-    )
-
-    canvas.create_text(
-        735.0,
-        618.0,
-        anchor="nw",
-        text="IGST",
-        fill="#000000",
-        font=("VarelaRound Regular", 14 * -1)
-    )
-
-    canvas.create_text(
-        735.0,
-        640.0,
-        anchor="nw",
-        text="Sub Total",
-        fill="#000000",
-        font=("Poppins SemiBold", 14 * -1)
-    )
-
-    canvas.create_text(
-        735.0,
-        665.0,
-        anchor="nw",
-        text="Round Off",
-        fill="#000000",
-        font=("VarelaRound Regular", 14 * -1)
-    )
-
-    canvas.create_text(
-        735.0,
-        685.0,
-        anchor="nw",
-        text="Grand Total",
-        fill="#000000",
-        font=("Poppins SemiBold", 14 * -1)
-    )
-
-    # subtotal_txt = canvas.create_text(
-    #     830.0,
-    #     562.0,
-    #     anchor="nw",
-    #     text= "0.0",
-    #     fill="#000000",
-    #     font=("VarelaRound Regular", 20 * -1)
-    # )
-    # taxes_txt = canvas.create_text(
-    #     830.0,
-    #     597.0,
-    #     anchor="nw",
-    #     text= "0.0",
-    #     fill="#000000",
-    #     font=("VarelaRound Regular", 20 * -1)
-    # )
-    # discount_txt = canvas.create_text(
-    #     830.0,
-    #     632.0,
-    #     anchor="nw",
-    #     text= "0.0",
-    #     fill="#000000",
-    #     font=("VarelaRound Regular", 20 * -1)
-    # )
-    # total_txt = canvas.create_text(
-    #     830.0,
-    #     667.0,
-    #     anchor="nw",
-    #     text= "0.0",
-    #     fill="#000000",
-    #     font=("VarelaRound Regular", 20 * -1)
-    # )
-
-    taxable_total_txt = canvas.create_text(
-        855.0,
-        548.0,
-        anchor="nw",
-        text="0.0",
-        fill="#000000",
-        font=("Poppins SemiBold", 14 * -1)
-    )
-
-    CGST_txt = canvas.create_text(
-        855.0,
-        574.0,
-        anchor="nw",
-        text="0.0",
-        fill="#000000",
-        font=("VarelaRound Regular", 14 * -1)
-    )
-
-    SGST_txt = canvas.create_text(
-        855.0,
-        596.0,
-        anchor="nw",
-        text="0.0",
-        fill="#000000",
-        font=("VarelaRound Regular", 14 * -1)
-    )
-
-    IGST_txt = canvas.create_text(
-        855.0,
-        618.0,
-        anchor="nw",
-        text="0.0",
-        fill="#000000",
-        font=("VarelaRound Regular", 14 * -1)
-    )
-
-    sub_total_txt = canvas.create_text(
-        855.0,
-        640.0,
-        anchor="nw",
-        text="0.0",
-        fill="#000000",
-        font=("Poppins SemiBold", 14 * -1)
-    )
-
-    round_off_txt = canvas.create_text(
-        855.0,
-        665.0,
-        anchor="nw",
-        text="0.0",
-        fill="#000000",
-        font=("VarelaRound Regular", 14 * -1)
-    )
-
-    grand_total_txt = canvas.create_text(
-        855.0,
-        685.0,
-        anchor="nw",
-        text="0.0",
-        fill="#000000",
-        font=("Poppins SemiBold", 14 * -1)
-    )
-    
-
-
-    customer_name = ttk.Combobox(
-        window, 
-        values=get_client_names(), 
-        state="readonly", 
-        font=("VarelaRound Regular", 13 * -1)
-    )
-    customer_name.place(
-        x=27.0,
-        y=47.0,
-        width=210.0,
-        height=25.0
-    )
-    customer_name.bind("<<ComboboxSelected>>", on_client_selected)
-
-    contect_no = Entry(window,
-        bd=1,
-        bg="#FFFFFF",
-        fg="#000716",
-        cursor="xterm",
-        font=("VarelaRound Regular", 14 * -1),
-        highlightthickness=0
-    )
-    contect_no.place(
-        x=262.0,
-        y=47.0,
-        width=180.0,
-        height=25.0
-    )
-
-    invoice_no = Entry(window,
-        bd=1,
-        bg="#FFFFFF",
-        fg="#000716",
-        cursor="xterm",
-        font=("VarelaRound Regular", 14 * -1),
-        highlightthickness=0
-    )
-    invoice_no.place(
-        x=467.0,
-        y=47.0,
-        width=170.0,
-        height=25.0
-    )
+    def on_client_selected(event=None):
+        name = customer_name.get()
+        if not name:
+            return
+        try:
+            p = service.client_profile(name)
+        except InvoiceError as err:
+            show_error(err)
+            return
+        except Exception as e:
+            messagebox.showinfo("Error", f"Error fetching Supplier Data: {e}", parent=window)
+            return
+        invoice_no.delete(0, END)
+        gst_no.delete(0, END)
+        contect_no.delete(0, END)
+        contect_no.insert(0, p.contact_display)
+        gst_no.insert(0, p.gst_no)
+        if p.next_invoice_no is not None:
+            invoice_no.insert(0, p.next_invoice_no)
 
     def on_invoice_no_change(event):
-        T_invoice_number = invoice_no.get()
-        T_customer_name = customer_name.get()
-        check_invoice_exists(T_invoice_number, T_customer_name)
-        
-    invoice_no.bind("<KeyRelease>", on_invoice_no_change)
-
-    
-    date_entry = DateEntry(window, width=12, background="#000000", foreground="white", borderwidth=2, date_pattern='dd/mm/yyyy', font=("VarelaRound Regular", 13 * -1))
-    date_entry.place(
-        x=662.0,
-        y=47.0,
-        width=190.0,
-        height=25.0
-    )
-
-    invoice_type = ttk.Combobox(
-        window, 
-        values=["GST Sales", "Non-GST Sales"], 
-        state="readonly", 
-        font=("VarelaRound Regular", 14 * -1)
-    )
-    invoice_type.set("GST Sales")
-    invoice_type.place(
-        x=877.0,
-        y=47.0,
-        width=120.0,
-        height=25.0
-    )
+        inv, name = current()
+        if service.invoice_exists(inv, name):
+            messagebox.showinfo("Invoice Exists", "Invoice number already exists.", parent=window)
+            invoice_no.delete(0, END)
 
     def gst_enable(event):
-        if invoice_type.get() == "GST Sales":
+        if invoice_type.get() == config.gst_invoice_type:
             gst_no.config(state="normal")
             gst.config(state="normal")
         else:
             gst_no.config(state="disabled")
-            gst.delete(0,END)
-            gst.insert(0,"0")
+            gst.delete(0, END)
+            gst.insert(0, "0")
             gst.config(state="disabled")
-    
+
+    def _apply_master(m, skip):
+        """Fill the other item fields from a lookup result."""
+        if not m:
+            return
+        if skip != "code" and m.item_code:
+            item_code.delete(0, END)
+            item_code.insert(0, m.item_code)
+        if skip != "name" and m.item_name:
+            item_name.delete(0, END)
+            item_name.insert(0, m.item_name)
+        if m.price is not None:
+            price.delete(0, END)
+            price.insert(0, m.price)
+        calculate_total()
+
+    def on_item_code_select(value):
+        _apply_master(service.item_by_code(value), skip="code")
+
+    def on_item_name_select(value):
+        _apply_master(service.item_by_name(value), skip="name")
+
+    def on_close(*args):
+        if messagebox.askyesno("Exit Confirmation", "Are you sure you want to Close?", parent=window):
+            service.discard_draft()
+            Top_Close(window, parent)
+
+    # =============================================================================
+    #  UI Creation
+    # =============================================================================
+    window = tk.Toplevel(parent)
+    center_window(window, 1280, 720)
+    window.iconbitmap(generate_path("UI", "assets", "BillMates.ico"))
+    window.title(config.window_title)
+    window.resizable(False, False)
+    window.configure(bg="#E7EBFF")
+    window.transient(parent)
+    window.grab_set()
+    window.focus()
+
+    canvas = Canvas(window, bg="#E7EBFF", height=720, width=1280, bd=0, highlightthickness=0, relief="ridge")
+    canvas.place(x=0, y=0)
+
+    float_validation = window.register(lambda value: value == "" or value.replace(".", "", 1).isdigit())
+
+    # ---- Treeview ---------------------------------------------------------------
+    treeview_frame_x, treeview_frame_y = 20, 168
+    treeview_width, treeview_height = 1230, 368
+
+    scrollbar = Scrollbar(window, orient="vertical")
+    scrollbar.place(x=treeview_frame_x + treeview_width - 20, y=treeview_frame_y, height=treeview_height)
+
+    columns = ("Sr No.", "Item Name", "Quantity", "Price", "Taxes", "Discount %", "Subtotal", "Delete")
+    treeview = ttk.Treeview(window, columns=columns, show="headings", yscrollcommand=scrollbar.set,
+                            height=16, style="Treeview.Heading")
+    treeview.place(x=treeview_frame_x, y=treeview_frame_y, width=treeview_width, height=treeview_height)
+    scrollbar.config(command=treeview.yview)
+
+    style = ttk.Style(window)
+    style.configure("Treeview.Heading", font=("Arial", 10, "bold"), background="#f0f0f0")
+    style.configure("Treeview", font=("Arial", 9))
+
+    columns_config = [("Sr No.", 74), ("Item Name", 354), ("Quantity", 155), ("Price", 150),
+                      ("Taxes", 127), ("Discount %", 140), ("Subtotal", 160), ("Delete", 74)]
+    for col_name, col_width in columns_config:
+        treeview.heading(col_name, text=col_name, anchor="center")
+        treeview.column(col_name, anchor="center", width=col_width, stretch=False)
+
+    treeview.bind("<Delete>", delete_item)
+    treeview.bind("<Double-1>", on_treeview_double_click)
+    treeview.bind("<Button-1>", on_treeview_button_click)
+
+    # ---- Static labels ----------------------------------------------------------
+    cl = config.client_label
+    for x, y, text in [
+        (27, 28, f"{cl} Name"), (262, 28, f"{cl} No."), (467, 28, "Invoice No."),
+        (662, 28, "Invoice Date"), (877, 28, "Invoice Type"), (1022, 28, f"{cl} GST No."),
+        (27, 102, "HSN Code"), (166, 102, "Item Name"), (445, 102, "Quantity "), (574, 102, "Unit"),
+        (683, 102, config.price_label), (822, 102, "Discount (%)"), (951, 102, "GST (%)"),
+        (1080, 102, "Item Total"),
+        (28, 552, "Reference No. "), (28, 607, "Remarks"),
+        (303, 556, "Payment Type"), (303, 605, "Payment Amount"), (303, 655, "Remaining Amount "),
+    ]:
+        canvas.create_text(x, y, anchor="nw", text=text, fill="#000000", font=FONT_LABEL)
+
+    summary_txt = {}
+    for key, label, y, font in SUMMARY_ROWS:
+        canvas.create_text(735, y, anchor="nw", text=label, fill="#000000", font=font)
+        summary_txt[key] = canvas.create_text(855, y, anchor="nw", text="0.0", fill="#000000", font=font)
+
+    # ---- Header fields ----------------------------------------------------------
+    try:
+        client_names = service.client_names()
+    except Exception as e:
+        messagebox.showinfo("Error", f"Error fetching Supplier names: {e}", parent=window)
+        client_names = []
+ 
+    customer_name = ttk.Combobox(window, values=client_names, state="readonly", font=("VarelaRound Regular", 13 * -1))
+    customer_name.place(x=27.0, y=47.0, width=210.0, height=25.0)
+    customer_name.bind("<<ComboboxSelected>>", on_client_selected)
+ 
+    contect_no = _entry(window, 262, 47, 180)
+    invoice_no = _entry(window, 467, 47, 170)
+    invoice_no.bind("<KeyRelease>", on_invoice_no_change)
+ 
+    date_entry = DateEntry(window, width=12, background="#000000", foreground="white", borderwidth=2,
+                           date_pattern='dd/mm/yyyy', font=("VarelaRound Regular", 13 * -1))
+    date_entry.place(x=662.0, y=47.0, width=190.0, height=25.0)
+ 
+    invoice_type = ttk.Combobox(window, values=list(config.invoice_types), state="readonly", font=FONT_VALUE)
+    invoice_type.set(config.default_invoice_type)
+    invoice_type.place(x=877.0, y=47.0, width=120.0, height=25.0)
     invoice_type.bind("<<ComboboxSelected>>", gst_enable)
-    
-    gst_no = Entry(window,
-        bd=1,
-        bg="#FFFFFF",
-        fg="#000716",
-        cursor="xterm",
-        font=("VarelaRound Regular", 14 * -1),
-        highlightthickness=0
-    )
-    gst_no.place(
-        x=1022.0,
-        y=47.0,
-        width=170.0,
-        height=25.0
-    )
-    
-
-    item_code = Entry(window,
-        bd=1,
-        bg="#FFFFFF",
-        fg="#000716",
-        cursor="xterm",
-        font=("VarelaRound Regular", 14 * -1),
-        highlightthickness=0
-    )
-    item_code.place(
-        x=27.0,
-        y=122.0,
-        width=120.0,
-        height=25.0
-    )
-    quary = """
-    SELECT DISTINCT item_code AS item_code
-        FROM (
-            SELECT item_code
-            FROM InvoiceItems
-            UNION
-            SELECT item_code
-            FROM PurchaseItems
-            UNION
-            SELECT item_code
-            FROM DummyInvoiceItems
-            UNION
-            SELECT item_code
-            FROM DummyPurchaseItems
-        ) AS combined_items;
-    """
-    data = [row[0] for row in fetch_data(quary)]
-    listbox = tk.Listbox(window, font=("VarelaRound Regular", 14 * -1), height=5)
-    SearchBox(item_code, listbox, data)
-    
-
-    item_name = Entry(window,
-        bd=1,
-        bg="#FFFFFF",
-        fg="#000716",
-        cursor="xterm",
-        font=("VarelaRound Regular", 14 * -1),
-        highlightthickness=0
-    )
-    item_name.place(
-        x=166.0,
-        y=122.0,
-        width=260.0,
-        height=25.0
-    )
-
-    quary = """
-    SELECT DISTINCT item_name AS item_name
-        FROM (
-            SELECT item_name
-            FROM InvoiceItems
-            UNION
-            SELECT item_name
-            FROM PurchaseItems
-            UNION
-            SELECT item_name
-            FROM DummyInvoiceItems
-            UNION
-            SELECT item_name
-            FROM DummyPurchaseItems
-        ) AS combined_items;
-    """
-
-    data = [row[0] for row in fetch_data(quary)]
-    listbox = tk.Listbox(window, font=("VarelaRound Regular", 14 * -1), height=5)
-    SearchBox(item_name, listbox, data)
-
-
-    qty_var = tk.StringVar()
-    qty = tk.Spinbox(
-        window, 
-        from_=0.0, 
-        to=100.0, 
-        increment=1, 
-        format="%.2f", 
-        width=30, 
-        validate="key",
-        validatecommand=(float_validation, "%P"),
-        font=("VarelaRound Regular", 14 * -1), 
-        textvariable=qty_var
-    )
-    qty.place(
-        x=445.0,
-        y=122.0,
-        width=110.0,
-        height=25.0
-    )
-    qty_var.trace("w", calculate_total)
-
-# Unit Feield 
-    unites = ["QTY","Meter","Pieces","Inch","CM","Roll"]
-    entry_9 = ttk.Combobox(window, values=unites, state="readonly", font=("VarelaRound Regular", 14 * -1))
+ 
+    gst_no = _entry(window, 1022, 47, 170)
+ 
+    # ---- Item entry row ---------------------------------------------------------
+    item_code = _entry(window, 27, 122, 120)
+    AutoComplete(item_code, service.item_codes, on_select=on_item_code_select)
+ 
+    item_name = _entry(window, 166, 122, 260)
+    AutoComplete(item_name, service.item_names, on_select=on_item_name_select)
+ 
+    qty = tk.Spinbox(window, from_=0.0, to=100.0, increment=1, format="%.2f", width=30,
+                     validate="key", validatecommand=(float_validation, "%P"), font=FONT_VALUE)
+    qty.place(x=445.0, y=122.0, width=110.0, height=25.0)
+ 
+    unites = ["QTY", "Meter", "Pieces", "Inch", "CM", "Roll"]
+    entry_9 = ttk.Combobox(window, values=unites, state="readonly", font=FONT_VALUE)
     entry_9.current(0)
-    entry_9.place(
-        x=574.0,
-        y=122.0,
-        width=90.0,
-        height=25.0
-    )
-
-    price_var = tk.StringVar()
-    price = Entry(
-        window,
-        bd=1,
-        bg="#FFFFFF",
-        fg="#000716",
-        cursor="xterm",
-        highlightthickness=1,
-        validate="key",
-        validatecommand=(float_validation, "%P"),
-        font=("VarelaRound Regular", 14 * -1),
-        textvariable=price_var
-    )
-    price.place(
-        x=683.0,
-        y=122.0,
-        width=120.0,
-        height=25.0
-    )
-    price_var.trace("w", calculate_total)
-
-    gst_var = tk.StringVar()
-    gst = Entry(
-        window,
-        bd=1,
-        bg="#FFFFFF",
-        fg="#000716",
-        cursor="xterm",
-        highlightthickness=1,
-        validate="key",
-        validatecommand=(float_validation, "%P"),
-        font=("VarelaRound Regular", 14 * -1),
-        textvariable=gst_var
-    )
-    gst.place(
-        x=822.0,
-        y=122.0,
-        width=110.0,
-        height=25.0
-    )
-    gst_var.trace("w", calculate_total)
-    
-    discount_var = tk.StringVar()
-    discount = Entry(window,
-        bd=1,
-        bg="#FFFFFF",
-        fg="#000716",
-        cursor="xterm",
-        highlightthickness=1,
-        validate="key",
-        validatecommand=(float_validation, "%P"),
-        font=("VarelaRound Regular", 14 * -1),
-        textvariable=discount_var
-    )
-    discount.place(
-        x=951.0,
-        y=122.0,
-        width=110.0,
-        height=25.0
-    )
-    discount_var.trace("w", calculate_total)
-
-
-
-    item_total_var = tk.DoubleVar()
-    Total = Entry(window,
-        bd=1,
-        bg="#FFFFFF",
-        fg="#000000",
-        highlightthickness=1,
-        font=("VarelaRound Regular", 14 * -1),
-        textvariable=item_total_var,
-        state="readonly"
-    )
-    Total.place(
-        x=1080.0,
-        y=122.0,
-        width=110.0,
-        height=25.0
-    )
-
-
-    Reference_no = Entry(window,
-        bd=1,
-        bg="#FFFFFF",
-        fg="#000716",
-        cursor="xterm",
-        font=("VarelaRound Regular", 14 * -1),
-        highlightthickness=0
-    )
-    Reference_no.place(
-        x=28.0,
-        y=574.0,
-        width=240.0,
-        height=25.0
-    )
-    
-# Payment Type
-    paymentMode = ["Cash","UPI","Net Banking","Check", "Card"]
+    entry_9.place(x=574.0, y=122.0, width=90.0, height=25.0)
+ 
+    num = dict(highlightthickness=1, validate="key", validatecommand=(float_validation, "%P"))
+    price = _entry(window, 683, 122, 120, **num)
+    discount = _entry(window, 822, 122, 110, **num)
+    gst = _entry(window, 951, 122, 110, **num)
+    for w in (qty, price, gst, discount):
+        w.bind("<FocusOut>", calculate_total)
+        w.bind("<KeyRelease>", calculate_total)
+ 
+    item_total = _entry(window, 1080, 122, 110, fg="#000000", cursor="", highlightthickness=1, state="readonly")
+ 
+    # ---- Payment / remarks ------------------------------------------------------
+    Reference_no = _entry(window, 28, 574, 240)
+ 
+    paymentMode = ["Cash", "UPI", "Net Banking", "Check", "Card"]
     payment_type = ttk.Combobox(window, values=paymentMode, state="readonly")
     payment_type.current(0)
-    payment_type.place(
-        x=303.0,
-        y=574.0,
-        width=160.0,
-        height=25.0
-    )
-    
-    paid_var = tk.StringVar()
-    amount_paid = Entry(window,
-        bd=1,
-        bg="#FFFFFF",
-        fg="#000716",
-        cursor="xterm",
-        font=("VarelaRound Regular", 14 * -1),
-        textvariable=paid_var,
-        validate="key",
-        validatecommand=(float_validation, "%P"),
-        highlightthickness=0
-    )
-    amount_paid.place(
-        x=303.0,
-        y=623.0,
-        width=160.0,
-        height=25.0
-    )
-    paid_var.trace("w", update_payment)
+    payment_type.place(x=303.0, y=574.0, width=160.0, height=25.0)
+ 
+    amount_paid = _entry(window, 303, 623, 160, validate="key", validatecommand=(float_validation, "%P"))
+    amount_paid.bind("<FocusOut>", update_payment)
+    amount_paid.bind("<KeyRelease>", update_payment)
+ 
+    amount_remain = _entry(window, 303, 672, 160, cursor="", state="readonly")
 
-    amount_remain = Entry(window,
-        bd=1,
-        bg="#FFFFFF",
-        fg="#000716",
-        font=("VarelaRound Regular", 14 * -1),
-        state="readonly",
-        highlightthickness=0
-    )
-    amount_remain.place(
-        x=303.0,
-        y=672.0,
-        width=160.0,
-        height=25.0
-    )
+    remark = Text(window, bd=1, bg="#FFFFFF", fg="#000716", cursor="xterm", font=FONT_VALUE, highlightthickness=0)
+    remark.place(x=28.0, y=627.0, width=240.0, height=70.0)
 
-    
-    remark = Text(window,
-        bd=1,
-        bg="#FFFFFF",
-        fg="#000716",
-        cursor="xterm",
-        font=("VarelaRound Regular", 14 * -1),
-        highlightthickness=0
-    )
-    remark.place(
-        x=28.0,
-        y=627.0,
-        width=240.0,
-        height=70.0
-    )
-    
-    
-    button_image_2 = PhotoImage(
-        file=relative_to_assets("button_2.png"))
-    button_add_item = Button(
-        window,
-        image=button_image_2,
-        borderwidth=0,
-        highlightthickness=0,
-        cursor="hand2", 
-        command= add_item,
-        relief="flat"
-    )
-    button_add_item.place(
-        x=1209.0,
-        y=109.0,
-        width=40.0,
-        height=40.0
-    )
+    # ---- Buttons ----------------------------------------------------------------
+    def make_button(img_name, command, x, y, w, h):
+        img = PhotoImage(file=relative_to_assets(img_name))
+        btn = Button(window, image=img, borderwidth=0, highlightthickness=0, cursor="hand2",
+                     command=command, relief="flat")
+        btn.image = img  # keep a reference
+        btn.place(x=x, y=y, width=w, height=h)
+        return btn
 
-    button_image_4 = PhotoImage(file=relative_to_assets("button_4.png"))
-    button_4 = Button(
-        window,
-        image=button_image_4,
-        borderwidth=0,
-        highlightthickness=0,
-        cursor="hand2", 
-        command=save_invoice,
-        relief="flat"
-    )
-    button_4.place(
-        x=1072.0,
-        y=568.0,
-        width=170.0,
-        height=50.0
-    )
-    
-    button_image_3 = PhotoImage(
-        file=relative_to_assets("button_3.png"))
-    button_3 = Button(
-        window,
-        image=button_image_3,
-        borderwidth=0,
-        highlightthickness=0,
-        cursor="hand2", 
-        command=export_invoice,
-        relief="flat"
-    )
-    button_3.place(
-        x=1072.0,
-        y=639.0,
-        width=170.0,
-        height=50.0
-    )
-
+    button_add_item = make_button("button_2.png", add_item, 1209, 109, 40, 40)
+    button_4 = make_button("button_4.png", save_invoice, 1072, 568, 170, 50)
+    button_3 = make_button("button_3.png", export_invoice, 1072, 639, 170, 50)
 
     window.bind('<Control-s>', lambda event: save_invoice())
     window.bind('<Control-p>', lambda event: export_invoice())
     window.bind('<Shift-Return>', lambda event: add_item())
-    
+
     window.resizable(False, False)
     window.protocol("WM_DELETE_WINDOW", on_close)
     window.bind("<Escape>", on_close)

@@ -81,26 +81,6 @@ def create_database():
             )
         """)
 
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS DummyInvoiceItems (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                invoice_no INTEGER NOT NULL,
-                client_id INTEGER NOT NULL,
-                item_code TEXT NOT NULL,
-                item_name TEXT NOT NULL,
-                quantity REAL NOT NULL,
-                unit TEXT NOT NULL,
-                price REAL NOT NULL,
-                subtotal REAL NOT NULL, 
-                GST_Rate TEXT NOT NULL,
-                taxes REAL NOT NULL, 
-                discount_amount REAL NOT NULL,
-                discount_percent REAL NOT NULL,
-                Total REAL NOT NULL,
-                FOREIGN KEY (invoice_no) REFERENCES Invoices(invoice_no),
-                FOREIGN KEY (client_id) REFERENCES Clients(id)
-            )
-        ''')
 
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS InvoiceItems (
@@ -165,26 +145,6 @@ def create_database():
             )
             ''')
         
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS DummyPurchaseItems (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                invoice_no INTEGER NOT NULL,
-                client_id INTEGER NOT NULL,
-                item_code TEXT NOT NULL,
-                item_name TEXT NOT NULL,
-                quantity REAL NOT NULL,
-                unit TEXT NOT NULL,
-                price REAL NOT NULL,
-                subtotal REAL NOT NULL, 
-                GST_Rate TEXT NOT NULL,
-                taxes REAL NOT NULL, 
-                discount_amount REAL NOT NULL,
-                discount_percent REAL NOT NULL,
-                Total REAL NOT NULL,
-                FOREIGN KEY (invoice_no) REFERENCES Purchase(invoice_no),
-                FOREIGN KEY (client_id) REFERENCES Clients(id)
-            )
-        ''')
         
         connection.commit()
         connection.close()

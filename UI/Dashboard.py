@@ -124,8 +124,9 @@ class Sidebar(Frame):
             "relief": "flat",
             "cursor": "hand2",
             "compound": "left",
-            "anchor": "w", 
-            "font": ("Poppins SemiBold", 11)
+            "anchor": "w",
+            "font": ("Poppins SemiBold", 11),
+            "height": self.button_height,
         }
 
         photo_image = None
@@ -167,6 +168,7 @@ class Sidebar(Frame):
         button.pack(
             fill="x",  # Make the button expand horizontally to fill the sidebar width
             ipadx=10,    # No horizontal padding, as button width is set by frame_width
+            ipady=8,
             pady=self.button_spacing, # Vertical spacing between buttons
             side=side, # Pack from tk.TOP (default) or tk.BOTTOM as determined by menu_data
             anchor="n" if side == tk.TOP else "s" # Anchor content to north for top-packed, south for bottom-packed,
