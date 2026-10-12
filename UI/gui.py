@@ -1,5 +1,6 @@
 from tkinter import messagebox
 from UI.restore import Restore_ui
+from utilities.path_utils import _show_error
 
 
 def new_client_ui(parent = None):
@@ -7,91 +8,91 @@ def new_client_ui(parent = None):
         import UI.addClient
         UI.addClient.new_client_ui(parent)
     except Exception as e:
-        messagebox.showerror("Unexpected Error", f"Unexpected error: {e}")
+        _show_error("Unexpected Error", f"Unexpected GUI Loading error: \n{e}")
 
 def manage_clients(parent = None):
     try:
         import UI.Manage_clients
         UI.Manage_clients.manage_clients(parent)
     except Exception as e:
-        messagebox.showerror("Unexpected Error", f"Unexpected error: {e}")
+        _show_error("Unexpected Error", f"Unexpected GUI Loading error: \n{e}")
 
 def new_purchase_ui(parent = None):
     try:
         import UI.Add_purchase
         UI.Add_purchase.new_purchase_ui(parent)
     except Exception as e:
-        messagebox.showerror("Unexpected Error", f"Unexpected error: {e}")
+        _show_error("Unexpected Error", f"Unexpected GUI Loading error: \n{e}")
  
 def manage_invoice_ui(parent = None):
     try:
         import UI.Manage_Invoices
         UI.Manage_Invoices.manage_invoice_ui(parent)
     except Exception as e:
-        messagebox.showerror("Unexpected Error", f"Unexpected error: {e}")
+        _show_error("Unexpected Error", f"Unexpected GUI Loading error: \n{e}")
 
 def customer_payment_in(parent = None):
     try:
         import UI.paymentIn
         UI.paymentIn.customer_payment_in(parent)
     except Exception as e:
-        messagebox.showerror("Unexpected Error", f"Unexpected error: {e}")
+        _show_error("Unexpected Error", f"Unexpected GUI Loading error: \n{e}")
 
 def expense_payments_out(parent = None):
     try:
         import UI.paymentOut
         UI.paymentOut.expense_payments_out(parent)
     except Exception as e:
-        messagebox.showerror("Unexpected Error", f"Unexpected error: {e}")
+        _show_error("Unexpected Error", f"Unexpected GUI Loading error: \n{e}")
 
 def supplier_payments_out(parent = None):
     try:
         import UI.paySup
         UI.paySup.supplier_payments_out(parent)
     except Exception as e:
-        messagebox.showerror("Unexpected Error", f"Unexpected error: {e}")
+        _show_error("Unexpected Error", f"Unexpected GUI Loading error: \n{e}")
   
 def pay_salery_ui(parent = None):
     try:
         import UI.Salery
         UI.Salery.pay_salery_ui(parent)
     except Exception as e:
-        messagebox.showerror("Unexpected Error", f"Unexpected error: {e}")
+        _show_error("Unexpected Error", f"Unexpected GUI Loading error: \n{e}")
 
 def new_adjustment_ui(parent = None):
     try:
         import UI.Add_Adjustment
         UI.Add_Adjustment.new_adjustment_ui(parent)
     except Exception as e:
-        messagebox.showerror("Unexpected Error", f"Unexpected error: {e}")
+        _show_error("Unexpected Error", f"Unexpected GUI Loading error: \n{e}")
 
 def manage_payments(parent = None):
     try:
         import UI.Manage_Payments
         UI.Manage_Payments.manage_payments(parent)
     except Exception as e:
-        messagebox.showerror("Unexpected Error", f"Unexpected error: {e}")
+        _show_error("Unexpected Error", f"Unexpected GUI Loading error: \n{e}")
 
 def new_invoice_ui(parent = None):
     try:
         import UI.Add_Invoice
         UI.Add_Invoice.new_invoice_ui(parent)
     except Exception as e:
-        messagebox.showerror("Unexpected Error", f"Unexpected error: {e}")
+        _show_error("Unexpected Error", f"Unexpected GUI Loading error: \n{e}")
 
 def company_info(Mode, parent = None):
     try:
         import UI.add_company
         UI.add_company.add_company(Mode, parent)
     except Exception as e:
-        messagebox.showerror("Unexpected Error", f"Unexpected error: {e}")
+        _show_error("Unexpected Error", f"Unexpected GUI Loading error: \n{e}")
 
 def Reports_ui(parent = None):
     try:
         import UI.Reports
         UI.Reports.Reports_ui(parent)
     except Exception as e:
-        messagebox.showerror("Unexpected Error", f"Unexpected error: {e}")
+        _show_error("Unexpected Error", f"Unexpected GUI Loading error: \n{e}")
 
 def Backup_ui(parent = None):
     try:
@@ -99,7 +100,7 @@ def Backup_ui(parent = None):
         UI.Backup.Backup_ui(parent)
         
     except Exception as e:
-        messagebox.showerror("Unexpected Error", f"Unexpected error: {e}")   
+        _show_error("Unexpected Error", f"Unexpected GUI Loading error: \n{e}")   
 
 def PrintCheque_ui(Cheque_id = None, parent = None):
     try:
@@ -107,7 +108,7 @@ def PrintCheque_ui(Cheque_id = None, parent = None):
         UI.ChequePrint.PrintOnCheque(Cheque_id, parent)
         
     except Exception as e:
-        messagebox.showerror("Unexpected Error", f"Unexpected error: {e}")   
+        _show_error("Unexpected Error", f"Unexpected GUI Loading error: \n{e}")   
 
 def addChequeBook_ui(ChequeBook_id = None, parent = None):
     try:
@@ -115,7 +116,7 @@ def addChequeBook_ui(ChequeBook_id = None, parent = None):
         UI.AddChequeBook.addChequeBook_ui(ChequeBook_id, parent)
         
     except Exception as e:
-        messagebox.showerror("Unexpected Error", f"Unexpected error: {e}")   
+        _show_error("Unexpected Error", f"Unexpected GUI Loading error: \n{e}")   
 
 def Manage_chequeBook_ui(parent = None):
     try:
@@ -123,7 +124,7 @@ def Manage_chequeBook_ui(parent = None):
         UI.Manage_chequeBook.Manage_chequeBook(parent)
         
     except Exception as e:
-        messagebox.showerror("Unexpected Error", f"Unexpected error: {e}")  
+        _show_error("Unexpected Error", f"Unexpected GUI Loading error: \n{e}")  
 
 def Manage_Cheques_ui(parent = None):
     try:
@@ -131,7 +132,7 @@ def Manage_Cheques_ui(parent = None):
         UI.Manage_Cheques.Manage_Cheques_ui(parent)
         
     except Exception as e:
-        messagebox.showerror("Unexpected Error", f"Unexpected error: {e}")  
+        _show_error("Unexpected Error", f"Unexpected GUI Loading error: \n{e}")  
 
 def payment_getway(parent = None):
     try:
@@ -139,7 +140,7 @@ def payment_getway(parent = None):
         UI.Payment_Getway.payment_getway(parent)
 
     except Exception as e:
-        messagebox.showerror("Unexpected Error", f"Unexpected error: {e}") 
+        _show_error("Unexpected Error", f"Unexpected GUI Loading error: \n{e}") 
 
 def terms_conditions(parent = None):
     try:
@@ -147,12 +148,4 @@ def terms_conditions(parent = None):
         TermsPopup.ask_terms(parent)
 
     except Exception as e:
-        messagebox.showerror("Unexpected Error", f"Unexpected error: {e}") 
-
-def add_items(parent = None, Mode = "new", Item_id = None):
-    try:
-        from UI.Add_Item import AddItemUI
-        AddItemUI(parent, mode=Mode, Item_id=Item_id)
-
-    except Exception as e:
-        messagebox.showerror("Unexpected Error", f"Unexpected error: {e}") 
+        _show_error("Unexpected Error", f"Unexpected GUI Loading error: \n{e}") 

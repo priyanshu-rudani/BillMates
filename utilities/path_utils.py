@@ -3,12 +3,24 @@ import os
 from pathlib import Path
 import tkinter as tk
 from tkinter import messagebox
+import logging
 import sqlite3
 import configparser
 from datetime import datetime, timedelta
 
-  
-def generate_path(*path_parts) -> Path:
+logger = logging.getLogger(__name__)
+
+
+def _show_error(title: str, message: str) -> None:
+    """Log always; show dialog only if Tk is usable."""
+    logger.error("%s: %s", title, message)
+    try:
+        messagebox.showerror(title, message)
+    except Exception:
+        pass
+
+
+def generate_path(*path_parts) -> str:
     """Generates a cross-platform path."""
     
     if getattr(sys, 'frozen', False):  # Running as a PyInstaller EXE
@@ -20,7 +32,7 @@ def generate_path(*path_parts) -> Path:
     return full_path
 
 
-def database_path(*path_parts) -> Path:
+def database_path(*path_parts) -> str:
     current_dir = os.path.splitdrive(os.getcwd())[0]
     if current_dir == "C:":
         # If the directory is C, use generate_path() method
@@ -50,50 +62,42 @@ def center_window(window, width, height):
 
 
 def fetch_data(query, params=None, db="clients.db"):
+    if not query:
+        return
+
+    connection = None
     try:
-        if not query:
-            return
-        
-        connection = sqlite3.connect(database_path(db))
-        cursor = connection.cursor()
-        if params:
-            cursor.execute(query, params)
-        else:
-            cursor.execute(query)
-        data = cursor.fetchall()
-        connection.close()
-        return data
+        connection = sqlite3.connect(database_path(db), timeout=30)
+        return connection.execute(query, params or ()).fetchall()
     except sqlite3.OperationalError as op_err:
-        messagebox.showerror("Operational Error", f"An operational error occurred: {op_err}")
+        _show_error("Operational Error", f"An operational error occurred: {op_err}")
     except sqlite3.IntegrityError as int_err:
-        messagebox.showerror("Integrity Error", f"An integrity error occurred: {int_err}")
+        _show_error("Integrity Error", f"An integrity error occurred: {int_err}")
     except sqlite3.DatabaseError as db_err:
-        messagebox.showerror("Database Error", f"An database error occurred: {db_err}")
+        _show_error("Database Error", f"A database error occurred: {db_err}")
     except Exception as e:
-        connection.rollback()
-        messagebox.showerror("Error", f"An unexpected error occurred: {e}")
+        _show_error("Error", f"An unexpected error occurred: {e}")
+    finally:
+        if connection is not None:
+            connection.close()
 
 def run_query(query, params=None, db="clients.db"):
+    connection = None
     try:
-        connection = sqlite3.connect(database_path(db))
-        cursor = connection.cursor()
-        if params:
-            cursor.execute(query, params)
-        else:
-            cursor.execute(query)
-        
-        connection.commit()
-        connection.close()
-        return
+        connection = sqlite3.connect(database_path(db), timeout=30)
+        with connection:                                    # commit on success, rollback on any exception
+            connection.execute(query, params or ())
     except sqlite3.OperationalError as op_err:
-        messagebox.showerror("Operational Error", f"An operational error occurred: {op_err}")
+        _show_error("Operational Error", f"An operational error occurred: {op_err}")
     except sqlite3.IntegrityError as int_err:
-        messagebox.showerror("Integrity Error", f"An integrity error occurred: {int_err}")
+        _show_error("Integrity Error", f"An integrity error occurred: {int_err}")
     except sqlite3.DatabaseError as db_err:
-        messagebox.showerror("Database Error", f"An database error occurred: {db_err}")
+        _show_error("Database Error", f"A database error occurred: {db_err}")
     except Exception as e:
-        connection.rollback()
-        messagebox.showerror("Error", f"An unexpected error occurred: {e}")
+        _show_error("Error", f"An unexpected error occurred: {e}")
+    finally:
+        if connection is not None:
+            connection.close()
 
 
 

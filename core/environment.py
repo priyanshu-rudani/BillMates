@@ -18,7 +18,6 @@ class EnvironmentSetup:
     def __init__(self):
         self.db_path = database_path("clients.db")
         self.profile_path = database_path("config.ini")
-        self.db_script = self.find_module_path("core/db_creater")
 
     def setup(self):
         try:
@@ -35,9 +34,6 @@ class EnvironmentSetup:
             os.makedirs(os.path.dirname(db_folder), exist_ok=True)
 
     def ensure_database(self):
-        if not os.path.exists(self.db_script):
-            messagebox.showerror("Error", "Database script not found. Please reinstall the software.")
-            sys.exit(1)
 
         if not os.path.exists(self.db_path):
             try:
@@ -62,27 +58,3 @@ class EnvironmentSetup:
                 App()
         else:
             App()
-
-    def find_module_path(self, relative_path_no_ext):
-        """
-        Finds a module's full path regardless of its extension (.py, .pyd, .so),
-        returning the first match or None if not found.
-
-        Example Usage: find_module_path("core/db_creater")
-        """
-        if getattr(sys, 'frozen', False):  # Running as a packaged .exe
-            root_path = Path(sys.executable).parent
-        else:  # Running as a .py script
-            # This points to the script's directory, e.g., F:\Project\Billsoft
-            root_path = Path(__file__).parent.parent
-
-        # Construct the base for the search, e.g., F:\Project\Billsoft\core\db_creater
-        search_base = root_path / relative_path_no_ext
-
-        try:
-            # Search for "db_creater.*" and get the first result
-            found_path = next(search_base.parent.glob(f"{search_base.name}.*"))
-            return found_path
-        except StopIteration:
-            # The glob search found no matching files
-            return None

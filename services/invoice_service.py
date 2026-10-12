@@ -44,7 +44,6 @@ class InvoiceConfig:
     # --- storage (declared per config) ---------------------------------------
     invoices_table: str               # header table
     items_table: str                  # saved line items (needs discount_percent + discount_amount)
-    items_master_table: str           # product master used for search / auto-fill
     item_history_tables: tuple        # extra tables mined for search suggestions
     price_column: Optional[str]       # master column used to auto-fill price (None -> don't fill)
     pdf_prefix: str
@@ -59,7 +58,7 @@ SALES_CONFIG = InvoiceConfig(
     name="sales",
     client_label="Client",
     client_type="Client",
-    window_title="Invoice",
+    window_title="Add New Invoice",
     price_label="Sale Price",
     invoice_types=("GST Sales", "Non-GST Sales"),
     default_invoice_type="GST Sales",
@@ -69,7 +68,6 @@ SALES_CONFIG = InvoiceConfig(
     payment_category="Invoice Payment",
     invoices_table="Invoices",
     items_table="InvoiceItems",
-    items_master_table="Items",
     item_history_tables=("InvoiceItems",),
     price_column="price",
     pdf_prefix="INV",
@@ -89,7 +87,6 @@ PURCHASE_CONFIG = InvoiceConfig(
     payment_category="Payment For Purchase",
     invoices_table="Purchase",
     items_table="PurchaseItems",
-    items_master_table="Items",
     item_history_tables=("InvoiceItems", "PurchaseItems"),
     price_column=None,                # don't pre-fill the SALE price as a purchase price
     pdf_prefix="PUR",
@@ -324,8 +321,8 @@ class InvoiceService:
     def _suggest(self, col: str) -> List[str]:
         """Master + history + items already in the current draft (fresh on every call)."""
         c = self.cfg
-        tables = (c.items_master_table,) + tuple(c.item_history_tables)
-        union = " UNION ".join(f"SELECT {col} AS v FROM {t}" for t in tables)
+        tables = tuple(c.item_history_tables)
+        union = " UNION ".join(f"SELECT {col} AS v FROM {table}" for table in tables)
         values = {str(r[0]).strip() for r in fetch_data(f"SELECT DISTINCT v FROM ({union})")
                   if r[0] is not None and str(r[0]).strip()}
         values |= {getattr(d, col).strip() for d in self.draft.items if (getattr(d, col) or "").strip()}
@@ -343,18 +340,14 @@ class InvoiceService:
         value = (value or "").strip()
         if not value:
             return None
-        price = c.price_column or "NULL"
-        rows = fetch_data(f"SELECT item_code, item_name, {price} FROM {c.items_master_table} "
-                          f"WHERE {by} = ? LIMIT 1", (value,))
-        if rows:
-            return ItemMaster(rows[0][0] or "", rows[0][1] or "", rows[0][2])
-        for t in c.item_history_tables:
-            rows = fetch_data(f"SELECT item_code, item_name FROM {t} WHERE {by} = ? LIMIT 1", (value,))
+        
+        for table in c.item_history_tables:
+            rows = fetch_data(f"SELECT item_code, item_name FROM {table} WHERE {by} = ? LIMIT 1", (value,))
             if rows:
                 return ItemMaster(rows[0][0] or "", rows[0][1] or "", None)
-        for d in self.draft.items:
-            if getattr(d, by) == value:
-                return ItemMaster(d.item_code, d.item_name, None)
+        for item in self.draft.items:
+            if getattr(item, by) == value:
+                return ItemMaster(item.item_code, item.item_name, None)
         return None
 
     def item_by_code(self, code: str) -> Optional[ItemMaster]:

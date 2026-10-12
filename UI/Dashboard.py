@@ -648,11 +648,11 @@ class App(Tk):
         super().__init__()
 
         self.geometry("1280x720")
+        self.iconbitmap(generate_path("UI", "assets", "BillMates.ico"))
         self.minsize(1280, 720)
         self.attributes('-fullscreen', True)
         Compney_name = str(read_ini("PROFILE", "name"))
         self.title(f"Dashboard - {Compney_name} (Admin) - BillMates")
-        self.iconbitmap(generate_path("UI", "assets", "BillMates.ico"))
         self.configure(bg="#E7EBFF")
 
         menu_data = [

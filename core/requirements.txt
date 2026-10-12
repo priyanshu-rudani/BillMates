@@ -1,7 +1,8 @@
-qrcode
-reportlab
-tkcalendar
-num2words
-openpyxl
-matplotlib
-pycryptodome
+qrcode>=8.2
+reportlab>=4.4
+tkcalendar>=1.6
+num2words>=0.5
+openpyxl>=3.1
+matplotlib>=3.10
+PyCryptodome>=3.24
+pillow>=12.0

@@ -8,12 +8,10 @@ else:  # Running as a Python script
     root_path = Path(__file__).parent.parent
 sys.path.append(str(root_path))
 
-from core.dependencies import DependencyChecker
 from core.environment import EnvironmentSetup
 
 
 def main():
-    DependencyChecker.check()
     setup = EnvironmentSetup()
     setup.setup()
 

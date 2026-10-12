@@ -60,11 +60,12 @@ def new_client_ui(parent = None):
         if Clients[0][0] > 0:
             messagebox.showerror("Validation Error", "This name is already exists with this client type", parent=window)
             return
-        
-        gst_pattern = r"[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}"
-        if not re.fullmatch(gst_pattern, gst):
-            messagebox.showerror("Error", "Invalid GSTIN Number!\nExample: 22ABCDE1234F1Z5", parent=window)
-            return
+
+        if gst:
+            gst_pattern = r"[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}"
+            if not re.fullmatch(gst_pattern, gst):
+                messagebox.showerror("Error", "Invalid GSTIN Number!\nExample: 22ABCDE1234F1Z5", parent=window)
+                return
 
         # Add to database
         try:
