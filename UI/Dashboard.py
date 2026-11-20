@@ -791,7 +791,7 @@ class App(Tk):
             "commands": [
                 {"label": "Add Purchase Payments (F5)", "command": lambda: supplier_payments_out(parent=self)},
                 {"label": "Add Expance Payments (F6)", "command": lambda: expense_payments_out(parent=self)},
-                {"label": "Add Salery Payments", "command": lambda: pay_salery_ui(parent=self)},
+                {"label": "Add Salery Payments", "command": lambda: pay_salary_ui(parent=self)},
                 {"label": "Manage Payments (F7)", "command": lambda: manage_payments(parent=self)}
             ]
         },

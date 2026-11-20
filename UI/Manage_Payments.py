@@ -386,7 +386,7 @@ def manage_payments(parent = None):
     Dropdown.add_command(label="  Add Expance Payments    ", command=lambda: expense_payments_out(parent = window))
     Dropdown.add_command(label="  Add Adjustment         ", command=lambda: new_adjustment_ui(parent = window))
     Dropdown.add_command(label="  Payment Getway          ", command=lambda: payment_getway(parent = window))
-    Dropdown.add_command(label="  Add Salery Payments     ", command=lambda: pay_salery_ui(parent = window))
+    Dropdown.add_command(label="  Add Salery Payments     ", command=lambda: pay_salary_ui(parent = window))
     button_3.config(command=lambda: toggle_submenu(Dropdown, button_3))
     
 

@@ -55,7 +55,7 @@ def supplier_payments_out(parent = None):
     except Exception as e:
         _show_error("Unexpected Error", f"Unexpected GUI Loading error: \n{e}")
   
-def pay_salery_ui(parent = None):
+def pay_salary_ui(parent = None):
     try:
         from services.payment_service import SALARY_PAYMENT_CONFIG
         from UI.payment_form import open_payment_window

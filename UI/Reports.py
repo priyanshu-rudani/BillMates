@@ -751,7 +751,7 @@ def Reports_ui(parent = None):
     Payments_dropdown.add_command(label="  Add Invoice Payments    ", command=lambda: customer_payment_in(parent=window))
     Payments_dropdown.add_command(label="  Add Purchase Payments   ", command=lambda: supplier_payments_out(parent=window))
     Payments_dropdown.add_command(label="  Add Expance Payments    ", command=lambda: expense_payments_out(parent=window))
-    Payments_dropdown.add_command(label="  Add Salery Payments     ", command=lambda: pay_salery_ui(parent=window))
+    Payments_dropdown.add_command(label="  Add Salery Payments     ", command=lambda: pay_salary_ui(parent=window))
     button_4.config(command=lambda: toggle_submenu(Payments_dropdown, button_4))
 
     treeview_frame = Frame(window)
