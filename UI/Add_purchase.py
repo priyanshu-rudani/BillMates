@@ -463,7 +463,7 @@ def new_purchase_ui(parent=None):
     window.resizable(False, False)
     window.protocol("WM_DELETE_WINDOW", on_close)
     window.bind("<Escape>", on_close)
-    window.mainloop()
+    window.wait_window()
 
 
 if __name__ == "__main__":

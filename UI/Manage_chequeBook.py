@@ -105,10 +105,10 @@ def Manage_chequeBook(parent = None):
             
             if type == "All ChequeBooks":
                 query = f"SELECT id, book_name, bank_name, holder_name, account_no, starting_ChequeNo, Current_ChequeNo, total_cheques, issued_date FROM ChequeBook"
-                result = fetch_data(query, db='Cheque.db')
+                result = fetch_data(query, db_name='Cheque.db')
             else: 
                 query = f"SELECT id, book_name, bank_name, holder_name, account_no, starting_ChequeNo, Current_ChequeNo, total_cheques, issued_date FROM ChequeBook WHERE {query_map[type]} LIKE '%' || '{search}' || '%'"
-                result = fetch_data(query, db='Cheque.db')
+                result = fetch_data(query, db_name='Cheque.db')
             
             # Clear current treeview data
             tree.delete(*tree.get_children())
@@ -147,7 +147,7 @@ def Manage_chequeBook(parent = None):
         tree.delete(*tree.get_children())
 
         query = f"SELECT id, book_name, bank_name, holder_name, account_no, starting_ChequeNo, Current_ChequeNo, total_cheques, issued_date FROM ChequeBook"
-        data = fetch_data(query, db='Cheque.db')
+        data = fetch_data(query, db_name='Cheque.db')
 
         for row in data:
             tree.insert("", "end", values=row)
@@ -163,8 +163,8 @@ def Manage_chequeBook(parent = None):
         if result:
             try:
 
-                run_query(f"DELETE FROM Cheques WHERE cheque_book_id = {id}", db='Cheque.db')
-                run_query(f"DELETE FROM ChequeBook WHERE id = {id}", db='Cheque.db')
+                run_query(f"DELETE FROM Cheques WHERE cheque_book_id = {id}", db_name='Cheque.db')
+                run_query(f"DELETE FROM ChequeBook WHERE id = {id}", db_name='Cheque.db')
 
                 tree.delete(selected_item)
                 messagebox.showinfo("Deleted", "ChequeBook successfully deleted.", parent=window)
@@ -349,7 +349,7 @@ def Manage_chequeBook(parent = None):
 
 
     query = f"SELECT id, book_name, bank_name, holder_name, account_no, starting_ChequeNo, Current_ChequeNo, total_cheques, issued_date FROM ChequeBook"
-    data = fetch_data(query, db='Cheque.db')
+    data = fetch_data(query, db_name='Cheque.db')
 
     for row in data:
         tree.insert("", "end", values=row)
@@ -363,7 +363,7 @@ def Manage_chequeBook(parent = None):
     window.resizable(False, False)
     window.bind("<Escape>", on_close)
     window.protocol("WM_DELETE_WINDOW", on_close)
-    window.mainloop()
+    window.wait_window()
 
 
 if __name__ == "__main__":

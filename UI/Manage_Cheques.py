@@ -49,7 +49,7 @@ def Manage_Cheques_ui(parent = None):
 
     def get_date_range():
 
-        dates = [row[0] for row in fetch_data("SELECT DISTINCT Cheque_Date FROM Cheques", db='Cheque.db')]
+        dates = [row[0] for row in fetch_data("SELECT DISTINCT Cheque_Date FROM Cheques", db_name='Cheque.db')]
 
         parsed_dates = [datetime.strptime(date, '%d/%m/%Y') for date in dates]
 
@@ -115,7 +115,7 @@ def Manage_Cheques_ui(parent = None):
         canvas.itemconfig(entry_bg_5, state='hidden')
 
         if selected_option == "Cheque Book":
-            chequeBook_Name = [name[0] for name in fetch_data("SELECT book_name FROM ChequeBook", db='Cheque.db')]
+            chequeBook_Name = [name[0] for name in fetch_data("SELECT book_name FROM ChequeBook", db_name='Cheque.db')]
             search_widget = ttk.Combobox(
                 window,
                 values=chequeBook_Name,
@@ -225,7 +225,7 @@ def Manage_Cheques_ui(parent = None):
                 pass
 
             elif f_search_at == "Cheque Book":
-                CB_id = fetch_data(f"SELECT id FROM ChequeBook WHERE book_name = '{f_search_value}'", db='Cheque.db')[0][0]
+                CB_id = fetch_data(f"SELECT id FROM ChequeBook WHERE book_name = '{f_search_value}'", db_name='Cheque.db')[0][0]
                 filters.append("C.cheque_book_id = ?")
                 cheque_params.append(CB_id)
 
@@ -269,7 +269,7 @@ FROM Cheques C
         query = cheque_query + where_clause
         params = cheque_params
 
-        result = fetch_data(query, params, db='Cheque.db')
+        result = fetch_data(query, params, db_name='Cheque.db')
 
         if result:
             for row in tree.get_children():
@@ -677,7 +677,7 @@ FROM Cheques C
             )
             if confirm:
                 try:
-                    run_query(f"DELETE FROM Cheques WHERE id = {id}", db='Cheque.db')
+                    run_query(f"DELETE FROM Cheques WHERE id = {id}", db_name='Cheque.db')
                     messagebox.showinfo("Success", "The Invoice is successfully Deleted!", parent=window)
 
                 except sqlite3.Error as e:
@@ -696,7 +696,7 @@ FROM Cheques C
             id = row_data[0] 
 
             try:
-                run_query(f"UPDATE Cheques SET Statues = '{text}' WHERE id = {id}", db='Cheque.db')
+                run_query(f"UPDATE Cheques SET Statues = '{text}' WHERE id = {id}", db_name='Cheque.db')
 
                 messagebox.showinfo("Success", f"The Cheques is successfully {text}!", parent=window)
 
@@ -734,7 +734,7 @@ FROM Cheques C
     window.bind('<Control-s>', lambda event: export_to_excel())
     window.bind('<Control-n>', lambda event: PrintOnCheque(parent=window))
 
-    window.mainloop()
+    window.wait_window()
 
 if __name__ == "__main__":
     Manage_Cheques_ui()    

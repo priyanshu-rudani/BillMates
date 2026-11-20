@@ -248,7 +248,7 @@ def add_company(Mode='new', parent = None):
 
     app.resizable(False, False)
     app.bind("<Escape>", lambda key: app.destroy())
-    app.mainloop()
+    app.wait_window()
 
     
 # --- How to Call in New and Edit Modes ---

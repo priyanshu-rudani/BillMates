@@ -57,12 +57,12 @@ def addChequeBook_ui(ChequeBook_id = None, parent = None):
                         issued_date = '{date}'
                     WHERE id = {ChequeBook_id}
                 """
-                run_query(query, db='Cheque.db')
+                run_query(query, db_name='Cheque.db')
             except ValueError:
                 messagebox.showwarning("Database Error", "Cheque Book not Updated.", parent=window)
         
         else:
-            isNameExist = fetch_data(f"SELECT 1 FROM ChequeBook WHERE book_name = '{bookName}';", db='Cheque.db')
+            isNameExist = fetch_data(f"SELECT 1 FROM ChequeBook WHERE book_name = '{bookName}';", db_name='Cheque.db')
             if isNameExist:
                 messagebox.showwarning("Duplicate Entry", "Cheque Book name is already exists try with other name.", parent=window)
                 return
@@ -82,7 +82,7 @@ def addChequeBook_ui(ChequeBook_id = None, parent = None):
                         book_name, bank_name, holder_name, account_no, starting_ChequeNo, Current_ChequeNo, total_cheques, issued_date
                     ) VALUES (
                         '{bookName}', '{bankName}', '{accountHolder}', '{accountNo}', {startCq}, {currentCq}, {totalCq}, '{date}');
-                """, db='Cheque.db')
+                """, db_name='Cheque.db')
             except ValueError:
                 messagebox.showwarning("Database Error", "Cheque Book not Added.", parent=window)
 
@@ -208,7 +208,7 @@ def addChequeBook_ui(ChequeBook_id = None, parent = None):
 
     window.resizable(False, False)
     window.bind("<Escape>", lambda key: window.destroy())
-    window.mainloop()
+    window.wait_window()
 
 
 if __name__ == "__main__":

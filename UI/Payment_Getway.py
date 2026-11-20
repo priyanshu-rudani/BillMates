@@ -593,7 +593,7 @@ def payment_getway(parent = None):
 
     window.resizable(False, False)
     window.bind("<Escape>", lambda key: window.destroy())
-    window.mainloop()
+    window.wait_window()
 
 
 if __name__ == "__main__":

@@ -311,7 +311,7 @@ def new_client_ui(parent = None):
     window.resizable(False, False)
     window.bind("<Escape>", lambda event: Top_Close(window, parent))
     window.protocol("WM_DELETE_WINDOW", lambda: Top_Close(window, parent))
-    window.mainloop()
+    window.wait_window()
 
 
 if __name__ == "__main__":

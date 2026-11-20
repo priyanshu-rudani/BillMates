@@ -128,7 +128,7 @@ class Backup_ui(tk.Toplevel):
 
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         self.resizable(False, False)
-        self.mainloop()
+        self.wait_window()
 
 
     def on_close(self):

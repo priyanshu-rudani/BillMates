@@ -9,6 +9,7 @@ else:  # Running as a Python script
 sys.path.append(str(root_path))
 
 from utilities.path_utils import *
+from utilities.window_registry import single_instance, track
 from services.invoice_service import (
     InvoiceService, InvoiceError, InvoiceForm, ItemInput, SALES_CONFIG, calc_item,
 )
@@ -42,7 +43,7 @@ def _entry(window, x, y, w, h=25, **opts):
     e.place(x=x, y=y, width=w, height=h)
     return e
 
-
+@single_instance("new_invoice")
 def new_invoice_ui(parent=None):
 
     config = SALES_CONFIG
@@ -315,6 +316,7 @@ def new_invoice_ui(parent=None):
     #  UI Creation
     # =============================================================================
     window = tk.Toplevel(parent)
+    track("new_invoice", window)
     center_window(window, 1280, 720)
     window.iconbitmap(generate_path("UI", "assets", "BillMates.ico"))
     window.title(config.window_title)
@@ -463,7 +465,8 @@ def new_invoice_ui(parent=None):
     window.resizable(False, False)
     window.protocol("WM_DELETE_WINDOW", on_close)
     window.bind("<Escape>", on_close)
-    window.mainloop()
+    # window.wait_window()
+    window.wait_window()
 
 
 if __name__ == "__main__":

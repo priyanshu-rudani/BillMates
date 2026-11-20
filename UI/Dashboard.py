@@ -17,6 +17,7 @@ import matplotlib.pyplot as plt
 from datetime import datetime, timedelta, date
 from PIL import Image, ImageTk
 from utilities.GenerateReport import export_report
+from services.report_service import ReportRepository
 
 from UI.gui import *
 
@@ -240,31 +241,20 @@ class MainFrame(Frame):
             end_date_year = current_year
         
         end_date = date(end_date_year, 3, 31).strftime("%d/%m/%Y")
-        dates = get_dates_between(start_date, end_date)
-
-        placeholders = ', '.join(['?'] * len(dates))
-
         financial_year = f"{end_date_year-1}-{end_date_year}"
-        total_sales = fetch_data(f"SELECT COALESCE(SUM(total), 0) FROM Invoices WHERE date IN ({placeholders})", dates)[0][0]
-        total_purchase = fetch_data(f"SELECT COALESCE(SUM(total), 0) FROM Purchase WHERE date IN ({placeholders})", dates)[0][0]
-        total_expanse = fetch_data(f"SELECT COALESCE(SUM(total_amount), 0) FROM Payments WHERE Expanse_type IN ('Rent', 'Utilities', 'Maintenance', 'Marketing', 'Loan Interest', 'Taxes', 'Other Expances') AND entity_type = 'Expense' AND date IN ({placeholders})", dates)[0][0]
-        total_cogs = fetch_data(f"SELECT COALESCE(SUM(total_amount), 0) FROM Payments WHERE Expanse_type IN ('Payment For Purchase', 'Salary', 'Transposition') AND entity_type IN ('Expense', 'Salaries') AND date IN ({placeholders})", dates)[0][0]
-        collected_revenue = fetch_data(f"SELECT COALESCE(SUM(total_amount), 0) FROM Payments WHERE Expanse_type = 'Invoice Payment' AND entity_type = 'Income' AND date IN ({placeholders})", dates)[0][0]
-        settled_purchase = fetch_data(f"SELECT COALESCE(SUM(total_amount), 0) FROM Payments WHERE Expanse_type = 'Payment For Purchase' AND entity_type = 'Expense' AND date IN ({placeholders})", dates)[0][0]
-        amount_receivable = fetch_data(f"SELECT COALESCE(SUM(remaining), 0) FROM Invoices WHERE date IN ({placeholders})", dates)[0][0]
-        amount_payable = fetch_data(f"SELECT COALESCE(SUM(remaining), 0) FROM Purchase WHERE date IN ({placeholders})", dates)[0][0]
-        net_profit_Loss = total_sales - total_purchase - total_expanse
+
+        metrics = ReportRepository.get_financial_dashboard_metrics(start_date, end_date)
         
         self.financial_year_card._update_value(financial_year)
-        self.total_sales_card._update_value(total_sales)
-        self.total_purchase_card._update_value(-total_purchase)
-        self.total_expanse_card._update_value(-total_expanse)
-        self.total_cogs_card._update_value(-total_cogs)
-        self.collected_revenue_card._update_value(collected_revenue)
-        self.settled_purchase_card._update_value(-settled_purchase)
-        self.amount_receivable_card._update_value(amount_receivable)
-        self.amount_payable_card._update_value(-amount_payable)
-        self.net_profit_Loss_card._update_value(net_profit_Loss)
+        self.total_sales_card._update_value(metrics["total_sales"])
+        self.total_purchase_card._update_value(-metrics["total_purchase"])
+        self.total_expanse_card._update_value(-metrics["total_operating_expenses"])
+        self.total_cogs_card._update_value(-metrics["total_cogs"])
+        self.collected_revenue_card._update_value(metrics["collected_revenue"])
+        self.settled_purchase_card._update_value(-metrics["settled_purchases"])
+        self.amount_receivable_card._update_value(metrics["accounts_receivable"])
+        self.amount_payable_card._update_value(-metrics["accounts_payable"])
+        self.net_profit_Loss_card._update_value(metrics["net_profit_loss"])
     
     def reload_Charts(self):
         self.line_chart._update_chart()
@@ -334,32 +324,16 @@ class LineChartFrame(Frame):
 
         self.dates, self.revenue, self.expenses = self._generate_data()
 
-        # Initialize Matplotlib Figure and Axis as instance variables
-        self.fig = None
-        self.ax = None
-        self.chart_canvas = None
-
-        self._create_chart()
-
-    def _update_chart(self):
-        # Re-fetch the latest data
-        self.dates, self.revenue, self.expenses = self._generate_data()
-        self.fig = None
-        self.ax = None
-        self.chart_canvas = None
-
-        # Re-create the chart with the new data
-        self._create_chart()
-        
-    def _create_chart(self):
-
-        if self.chart_canvas:
-            self.chart_canvas.get_tk_widget().destroy()
-            self.fig.clear() # Clear the figure to redraw content
-
-        # Create a Figure for the plot with a light gray background
+        # Initialize persistent Matplotlib Figure and Axis once
         self.fig = Figure()
         self.ax = self.fig.add_subplot(111)
+        self.chart_canvas = FigureCanvasTkAgg(self.fig, master=self)
+        self.chart_canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+
+        self._render_plot()
+
+    def _render_plot(self):
+        self.ax.clear()
 
         # Plot the revenue and expenses lines
         self.ax.plot(self.dates, self.revenue, marker='o', linestyle='-', color='#007acc', label='Revenue')
@@ -368,18 +342,19 @@ class LineChartFrame(Frame):
         # --- Customize the plot appearance ---
         self.ax.set_ylabel('Amount (in Rs.)', fontsize=10)
         self.ax.set_xlabel('Last 7 Days', fontsize=10)
-
         self.ax.set_ylim(bottom=0)
-
-        # Add a grid for better readabilit
         self.ax.grid(True, which='both', linestyle='--', linewidth=0.5)
         self.ax.legend(fontsize=10)
         self.fig.tight_layout(pad=2.0)
+        self.chart_canvas.draw_idle()
 
-        # --- Embed the plot in Tkinter ---
-        self.chart_canvas = FigureCanvasTkAgg(self.fig, master=self)
-        self.chart_canvas.draw()
-        self.chart_canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+    def _update_chart(self):
+        # Re-fetch the latest data and update existing figure
+        self.dates, self.revenue, self.expenses = self._generate_data()
+        self._render_plot()
+        
+    def _create_chart(self):
+        self._render_plot()
 
 
     def _generate_data(self):
@@ -431,82 +406,60 @@ class PieChartFrame(Frame):
                          highlightbackground="#ffffff", highlightthickness=0,
                          *args, **kwargs)
         
-        # --- FIX 1: Prevent this frame from propagating its size based on children ---
         self.grid_propagate(False)
-
-        # Configure internal grid to ensure canvas expands within this frame
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(0, weight=1)
 
         self.labels, self.value = self._generate_data()
 
-        # Initialize Matplotlib Figure and Axis as instance variables
-        self.figure = None
-        self.axis = None
-        self.canvas = None # Renamed from self.piecanvas for consistency
-
-        self._create_Pie_chart()
-
-        # --- FIX 2: Bind to <Configure> event for dynamic resizing ---
-        self.bind("<Configure>", self._on_frame_resize)
-
-    def _update_chart(self):
-        # Re-fetch the latest data
-        self.labels, self.value = self._generate_data()
-        self.figure = None
-        self.axis = None
-        self.canvas = None
-
-        # Re-create the chart with the new data
-        self._create_Pie_chart()
-
-    def _create_Pie_chart(self):
-
-        if self.canvas:
-            self.canvas.get_tk_widget().destroy()
-            self.figure.clear() # Clear the figure to redraw content
-
-        # Create a Figure for the plot. Initial figsize is a placeholder.
+        # Initialize persistent Matplotlib Figure and Axis once
         self.figure = Figure(facecolor="#ffffff")
         self.axis = self.figure.add_subplot(111)
+        self.canvas = FigureCanvasTkAgg(self.figure, master=self)
+        self.canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
 
-        # --- Check if there is data to plot ---
+        self._render_pie()
+        self.bind("<Configure>", self._on_frame_resize)
+
+    def _render_pie(self):
+        self.axis.clear()
+
+        # Check if there is data to plot
         if not self.value or sum(self.value) == 0:
-            # If there are no expenses, display a message in the center.
             self.axis.text(0.5, 0.5, 'No Expenses', 
                     horizontalalignment='center', 
                     verticalalignment='center', 
                     fontsize=16, 
                     color='gray',
-                    transform=self.axis.transAxes) # Use transform=ax.transAxes for relative coordinates
-            
-            # Hide the axis lines and ticks for a clean, empty look
+                    transform=self.axis.transAxes)
             self.axis.set_xticks([])
             self.axis.set_yticks([])
             for spine in self.axis.spines.values():
                 spine.set_visible(False)
         else:
-            # If data exists, create the pie chart as before
             wedges, texts, autotexts = self.axis.pie(
                 self.value, 
-                autopct='%1.1f%%', # Add percentage labels
+                autopct='%1.1f%%',
                 startangle=90,
-                textprops=dict(color="w") # Set percentage text color to white
+                textprops=dict(color="w")
             )
-            
             self.axis.legend(wedges, self.labels,
                       title="Expense Types",
                       loc="best",
                       fontsize='small')
-
             plt.setp(autotexts, size=10, weight="bold")
             self.axis.axis('equal')
 
         self.figure.tight_layout(pad=1.0)
+        self.canvas.draw_idle()
 
-        self.canvas = FigureCanvasTkAgg(self.figure, master=self)
-        self.canvas.draw()
-        self.canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+    def _update_chart(self):
+        # Re-fetch the latest data and redraw on persistent figure
+        self.labels, self.value = self._generate_data()
+        self._render_pie()
+
+    def _create_Pie_chart(self):
+        self._render_pie()
 
 
     def _on_frame_resize(self, event):
@@ -609,39 +562,188 @@ def export_year_report(report_type):
     except Exception as e:
         messagebox.showerror("Unexpected Error", f"Unexpected error: {e}")
 
-def on_closing(root):
-        """Stop the after function, check backup, and close the window"""
+def ask_backup_exit_choice(parent, title: str, message: str) -> str:
+    """
+    Shows a custom modal dialog on exit prompting for backup:
+    Returns:
+        "backup": User selected 'Backup Now'
+        "exit": User selected 'Backup Later / Exit'
+        "cancel": User closed or cancelled the prompt (stay in app)
+    """
+    choice = {"action": "cancel"}
 
-        root.config(cursor="watch")  # Show waiting cursor before quitting
+    dialog = tk.Toplevel(parent)
+    dialog.title(title)
+    dialog.iconbitmap(generate_path("UI", "assets", "BillMates.ico"))
+    dialog.transient(parent)
+    dialog.configure(bg="#FBF6FF")
+    center_window(dialog, 460, 220)
+    dialog.resizable(False, False)
+
+    # Header / Title area
+    header_frame = tk.Frame(dialog, bg="#E7EBFF", height=50)
+    header_frame.pack(fill="x", side="top")
+    header_frame.pack_propagate(False)
+
+    header_label = tk.Label(
+        header_frame,
+        text=f"  {message}",
+        bg="#E7EBFF",
+        fg="#151D48",
+        font=("Poppins SemiBold", 13 * -1),
+        anchor="w"
+    )
+    header_label.pack(side="left", padx=16, fill="both", expand=True)
+
+    # Message Content
+    body_frame = tk.Frame(dialog, bg="#FBF6FF")
+    body_frame.pack(fill="both", expand=True, padx=22, pady=(15, 10))
+
+    sub_label = tk.Label(
+        body_frame,
+        text="Would you like to backup your company data before closing?",
+        bg="#FBF6FF",
+        fg="#5E6366",
+        font=("VarelaRound Regular", 11 * -1),
+        wraplength=410,
+        justify="left"
+    )
+    sub_label.pack(anchor="w", pady=(8, 0))
+
+    # Action Buttons
+    button_frame = tk.Frame(dialog, bg="#FBF6FF")
+    button_frame.pack(fill="x", side="bottom", padx=20, pady=15)
+
+    def select(action):
+        choice["action"] = action
+        try:
+            dialog.grab_release()
+        except Exception:
+            pass
+        dialog.destroy()
+
+    # Cancel (Stay in App)
+    btn_cancel = tk.Button(
+        button_frame,
+        text="Cancel",
+        bg="#E2E8F0",
+        fg="#334155",
+        activebackground="#CBD5E1",
+        activeforeground="#1E293B",
+        font=("VarelaRound Regular", 11 * -1),
+        bd=0,
+        relief="flat",
+        cursor="hand2",
+        command=lambda: select("cancel"),
+        padx=12,
+        pady=6
+    )
+    btn_cancel.pack(side="left")
+
+    # Backup Later & Exit
+    btn_later = tk.Button(
+        button_frame,
+        text="Backup Later / Exit",
+        bg="#F1F5F9",
+        fg="#475569",
+        activebackground="#E2E8F0",
+        activeforeground="#1E293B",
+        font=("VarelaRound Regular", 11 * -1),
+        bd=1,
+        relief="solid",
+        cursor="hand2",
+        command=lambda: select("exit"),
+        padx=12,
+        pady=6
+    )
+    btn_later.pack(side="right", padx=(8, 0))
+
+    # Backup Now
+    btn_backup = tk.Button(
+        button_frame,
+        text="Backup Now",
+        bg="#4F59C1",
+        fg="#FFFFFF",
+        activebackground="#3F48A6",
+        activeforeground="#FFFFFF",
+        font=("VarelaRound Regular", 11 * -1),
+        bd=0,
+        relief="flat",
+        cursor="hand2",
+        command=lambda: select("backup"),
+        padx=14,
+        pady=6
+    )
+    btn_backup.pack(side="right")
+
+    # Make strictly modal and take absolute focus
+    dialog.update_idletasks()
+    dialog.deiconify()
+    dialog.lift()
+    dialog.focus_force()
+    btn_backup.focus_set()
+
+    try:
+        dialog.grab_set()
+    except Exception:
+        pass
+
+    # Stop propagation of <Escape> so it only closes this dialog and doesn't re-trigger App's <Escape>
+    def on_dialog_escape(event):
+        select("cancel")
+        return "break"
+
+    dialog.bind("<Escape>", on_dialog_escape)
+    dialog.protocol("WM_DELETE_WINDOW", lambda: select("cancel"))
+    dialog.wait_window()
+
+    return choice["action"]
+
+
+def on_closing(root):
+    """Stop the after function, check backup, and close the window"""
+
+    try:
+        root.config(cursor="watch")
         root.update_idletasks()
 
         last_backup_str = read_ini("BACKUP", "lastbackup")
+        reminder_title = None
+        reminder_msg = None
 
         if last_backup_str:
             try:
                 last_backup_datetime = datetime.strptime(last_backup_str, "%d/%m/%Y : %H:%M:%S")
                 today = datetime.now()
                 if (today - last_backup_datetime) > timedelta(days=30):
-                    if messagebox.askyesno(parent=root, title="Backup Reminder", message="It has been more than 30 days since the last backup. Do you want to open the backup options?", icon=messagebox.WARNING):
-                        root.config(cursor="")
-                        Backup_ui(parent=root)  # Open the backup UI
-                        return
-                    
+                    reminder_title = "Backup Reminder"
+                    reminder_msg = f"It has been more than 30 days since your last backup ({last_backup_str})."
             except ValueError:
-                # Handle case where lastbackup date is not in the correct format
-                if messagebox.askyesno(parent=root, title="Backup Information Invalid", message="The last backup information is not in the correct format. Do you want to open the backup options?", icon=messagebox.WARNING):
-                    root.config(cursor="")
-                    Backup_ui(parent=root)
-                    return
+                reminder_title = "Backup Information Invalid"
+                reminder_msg = "The recorded backup information is invalid or corrupted."
         else:
-            # Handle case where lastbackup key doesn't exist
-            if messagebox.askyesno(parent=root, title="No Backup Found", message="No previous backup information found. Do you want to open the backup options?", icon=messagebox.WARNING):
-                root.config(cursor="")
+            reminder_title = "No Backup Found"
+            reminder_msg = "No previous database backup was found for this system."
+
+        if reminder_title:
+            root.config(cursor="")
+            action = ask_backup_exit_choice(root, reminder_title, reminder_msg)
+            if action == "backup":
                 Backup_ui(parent=root)
                 return
+            elif action == "cancel":
+                return
+            # If action == "exit" ("Backup Later / Exit"), proceed to close below
 
+        root.config(cursor="")
         root.quit()
         sys.exit()
+    finally:
+        try:
+            root.config(cursor="")
+        except Exception:
+            pass
+
 
 class App(Tk):
     def __init__(self):

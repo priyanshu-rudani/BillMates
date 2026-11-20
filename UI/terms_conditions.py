@@ -339,4 +339,4 @@ if __name__ == "__main__":
     TermsPopup.ask_terms(app)
 
     app.bind("<Escape>", lambda key: app.destroy())
-    app.mainloop()
+    app.wait_window()

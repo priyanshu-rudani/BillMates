@@ -81,7 +81,7 @@ def PrintOnCheque(Cheque_id = None, parent = None):
         )
         if file_path:
             if data_saveCheque is True:
-                data_id = fetch_data(f"SELECT id FROM ChequeBook WHERE book_name = '{data_Cheque_book}'", db='Cheque.db')[0][0]
+                data_id = fetch_data(f"SELECT id FROM ChequeBook WHERE book_name = '{data_Cheque_book}'", db_name='Cheque.db')[0][0]
 
                 if Cheque_id:
                     
@@ -96,7 +96,7 @@ def PrintOnCheque(Cheque_id = None, parent = None):
                         WHERE id = {Cheque_id}
                     """
 
-                    run_query(query, db='Cheque.db')
+                    run_query(query, db_name='Cheque.db')
 
                 else:
                     query =f"""
@@ -106,11 +106,11 @@ def PrintOnCheque(Cheque_id = None, parent = None):
                         ({data_id}, '{data_Cheque_no}', '{data_Cheque_date}', '{data_Cheque_type}', '{data_Payee_name}', {data_Amount})
                     """
 
-                    run_query(query, db='Cheque.db')
+                    run_query(query, db_name='Cheque.db')
 
                     data_Cheque_no = int(data_Cheque_no) + 1
 
-                    run_query(f"UPDATE ChequeBook SET Current_ChequeNo = {data_Cheque_no} WHERE id = {data_id}", db='Cheque.db')
+                    run_query(f"UPDATE ChequeBook SET Current_ChequeNo = {data_Cheque_no} WHERE id = {data_id}", db_name='Cheque.db')
                     
 
             export_Cheque(file_path, data_Payee_name, data_Amount, str(Date_formate.get()),  data_Cheque_date, data_Cheque_type, bool(isBearer.get()))
@@ -132,8 +132,8 @@ def PrintOnCheque(Cheque_id = None, parent = None):
 
         filter = f"SELECT * FROM Cheques WHERE id = {id}"
 
-        Data = fetch_data(filter, db="Cheque.db")[0]
-        Cheque_book_Name = fetch_data(f"SELECT book_name FROM ChequeBook WHERE id = '{Data[1]}'", db='Cheque.db')[0][0]
+        Data = fetch_data(filter, db_name='Cheque.db')[0]
+        Cheque_book_Name = fetch_data(f"SELECT book_name FROM ChequeBook WHERE id = '{Data[1]}'", db_name='Cheque.db')[0][0]
 
         Cheque_book.set(Cheque_book_Name)
         onCheckbook_Select(None)
@@ -232,7 +232,7 @@ def PrintOnCheque(Cheque_id = None, parent = None):
             Account_no.set("")
             Cheque_no.set("")
 
-            Cheque_book_data = fetch_data(f"SELECT * FROM ChequeBook WHERE book_name = '{Selected_Book}'", db="Cheque.db")[0]
+            Cheque_book_data = fetch_data(f"SELECT * FROM ChequeBook WHERE book_name = '{Selected_Book}'", db_name='Cheque.db')[0]
             
             if Cheque_book_data[6] >= (Cheque_book_data[5] + Cheque_book_data[7]):
                 response = messagebox.askyesno(
@@ -296,7 +296,7 @@ def PrintOnCheque(Cheque_id = None, parent = None):
         outline="#000000")
 
 
-    Cheque_books = [row[0] for row in fetch_data("SELECT book_name FROM ChequeBook", db="Cheque.db")]
+    Cheque_books = [row[0] for row in fetch_data("SELECT book_name FROM ChequeBook", db_name='Cheque.db')]
     entry_1 = ttk.Combobox(
         window,
         textvariable=Cheque_book,  # Holds selected value
@@ -390,7 +390,7 @@ def PrintOnCheque(Cheque_id = None, parent = None):
         width=501.0,
         height=25.0
     )
-    data = [row[0] for row in fetch_data("SELECT DISTINCT Payee_name FROM Cheques", db="Cheque.db")]
+    data = [row[0] for row in fetch_data("SELECT DISTINCT Payee_name FROM Cheques", db_name='Cheque.db')]
     listbox = tk.Listbox(
         window, 
         height=5,
@@ -597,7 +597,7 @@ def PrintOnCheque(Cheque_id = None, parent = None):
 
     window.resizable(False, False)
     window.bind("<Escape>", lambda key: window.destroy())
-    window.mainloop()
+    window.wait_window()
 
 
 if __name__ == "__main__":

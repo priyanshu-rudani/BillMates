@@ -147,7 +147,7 @@ def manage_payments(parent = None):
             query = f"""
             SELECT 
                 payment_id, 
-                c.name AS client_name, 
+                COALESCE(c.name, 'Company Expense') AS client_name, 
                 Expanse_type, 
                 date, 
                 total_amount, 
@@ -155,7 +155,7 @@ def manage_payments(parent = None):
                 reference_no
             FROM 
                 Payments p
-            JOIN 
+            LEFT JOIN 
                 Clients c ON p.entity_id = c.id
             WHERE
                 {column} = '{search}'
@@ -204,7 +204,7 @@ def manage_payments(parent = None):
         query = """            
             SELECT 
                 payment_id, 
-                c.name AS client_name, 
+                COALESCE(c.name, 'Company Expense') AS client_name, 
                 Expanse_type, 
                 date, 
                 total_amount, 
@@ -212,7 +212,7 @@ def manage_payments(parent = None):
                 reference_no
             FROM 
                 Payments p
-            JOIN 
+            LEFT JOIN 
                 Clients c ON p.entity_id = c.id
         """
         data = fetch_data(query)
@@ -428,7 +428,7 @@ def manage_payments(parent = None):
     treeData = """
     SELECT 
         payment_id, 
-        c.name AS client_name, 
+        COALESCE(c.name, 'Company Expense') AS client_name, 
         Expanse_type, 
         date, 
         total_amount, 
@@ -436,7 +436,7 @@ def manage_payments(parent = None):
         reference_no
     FROM 
         Payments p
-    JOIN 
+    LEFT JOIN 
         Clients c ON p.entity_id = c.id;
     """
     data = fetch_data(treeData)
@@ -451,7 +451,7 @@ def manage_payments(parent = None):
     window.bind("<Escape>", lambda event: Top_Close(window, parent))
     window.protocol("WM_DELETE_WINDOW", lambda: Top_Close(window, parent))
     window.bind("<Return>", lambda event: search())
-    window.mainloop()
+    window.wait_window()
 
 
     
