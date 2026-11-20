@@ -33,29 +33,33 @@ def manage_invoice_ui(parent = None):
 
 def customer_payment_in(parent = None):
     try:
-        import UI.paymentIn
-        UI.paymentIn.customer_payment_in(parent)
+        from services.payment_service import CLIENT_PAYMENT_CONFIG
+        from UI.payment_form import open_payment_window
+        open_payment_window(CLIENT_PAYMENT_CONFIG, parent=parent)
     except Exception as e:
         _show_error("Unexpected Error", f"Unexpected GUI Loading error: \n{e}")
 
 def expense_payments_out(parent = None):
     try:
-        import UI.paymentOut
-        UI.paymentOut.expense_payments_out(parent)
+        from services.payment_service import EXPENSE_PAYMENT_CONFIG
+        from UI.payment_form import open_payment_window
+        open_payment_window(EXPENSE_PAYMENT_CONFIG, parent=parent)
     except Exception as e:
         _show_error("Unexpected Error", f"Unexpected GUI Loading error: \n{e}")
 
 def supplier_payments_out(parent = None):
     try:
-        import UI.paySup
-        UI.paySup.supplier_payments_out(parent)
+        from services.payment_service import SUPPLIER_PAYMENT_CONFIG
+        from UI.payment_form import open_payment_window
+        open_payment_window(SUPPLIER_PAYMENT_CONFIG, parent=parent)
     except Exception as e:
         _show_error("Unexpected Error", f"Unexpected GUI Loading error: \n{e}")
   
 def pay_salery_ui(parent = None):
     try:
-        import UI.Salery
-        UI.Salery.pay_salery_ui(parent)
+        from services.payment_service import SALARY_PAYMENT_CONFIG
+        from UI.payment_form import open_payment_window
+        open_payment_window(SALARY_PAYMENT_CONFIG, parent=parent)
     except Exception as e:
         _show_error("Unexpected Error", f"Unexpected GUI Loading error: \n{e}")
 
