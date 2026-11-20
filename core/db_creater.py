@@ -93,7 +93,7 @@ CLIENTS_SCHEMA = {
     "Payments": """
         CREATE TABLE IF NOT EXISTS Payments (
             payment_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            entity_id INTEGER NOT NULL,
+            entity_id INTEGER,
             entity_type TEXT NOT NULL,
             date DATE NOT NULL,
             total_amount REAL NOT NULL,
@@ -145,6 +145,16 @@ DATABASES = {
     "Cheque.db":  CHEQUE_SCHEMA,
 }
 
+REPORT_INDEXES = [
+    "CREATE INDEX IF NOT EXISTS idx_invoices_client_isodate ON Invoices (client_id, substr(date, 7, 4) || '-' || substr(date, 4, 2) || '-' || substr(date, 1, 2));",
+    "CREATE INDEX IF NOT EXISTS idx_invoices_isodate ON Invoices (substr(date, 7, 4) || '-' || substr(date, 4, 2) || '-' || substr(date, 1, 2));",
+    "CREATE INDEX IF NOT EXISTS idx_purchase_client_isodate ON Purchase (client_id, substr(date, 7, 4) || '-' || substr(date, 4, 2) || '-' || substr(date, 1, 2));",
+    "CREATE INDEX IF NOT EXISTS idx_purchase_isodate ON Purchase (substr(date, 7, 4) || '-' || substr(date, 4, 2) || '-' || substr(date, 1, 2));",
+    "CREATE INDEX IF NOT EXISTS idx_payments_entity_isodate ON Payments (entity_id, substr(date, 7, 4) || '-' || substr(date, 4, 2) || '-' || substr(date, 1, 2));",
+    "CREATE INDEX IF NOT EXISTS idx_payments_isodate ON Payments (substr(date, 7, 4) || '-' || substr(date, 4, 2) || '-' || substr(date, 1, 2));",
+    "CREATE INDEX IF NOT EXISTS idx_payments_types ON Payments (entity_type, Expanse_type);",
+]
+
 
 # =============================================================================
 # Core (reusable)
@@ -169,6 +179,11 @@ def _init_database(db_file: str, tables: dict) -> None:
         try:
             for current, ddl in tables.items():
                 conn.execute(ddl)
+
+            if db_file == "clients.db":
+                for idx_sql in REPORT_INDEXES:
+                    conn.execute(idx_sql)
+
             conn.execute("COMMIT")
         except BaseException:
             if conn.in_transaction:

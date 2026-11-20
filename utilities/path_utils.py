@@ -4,7 +4,6 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import messagebox
 import logging
-import sqlite3
 import configparser
 from datetime import datetime, timedelta
 
@@ -32,16 +31,6 @@ def generate_path(*path_parts) -> str:
     return full_path
 
 
-def database_path(*path_parts) -> str:
-    current_dir = os.path.splitdrive(os.getcwd())[0]
-    if current_dir == "C:":
-        # If the directory is C, use generate_path() method
-        appdata_path = os.path.join(os.getenv('APPDATA'), 'BillMates')
-        full_path = os.path.join(appdata_path, *path_parts)
-        return full_path
-    else:
-        # If it's not C, use appdata_path as a fallback
-        return generate_path("db", *path_parts)
 
 
 def center_window(window, width, height):
@@ -61,43 +50,12 @@ def center_window(window, width, height):
     window.minsize(width, height)
 
 
-def fetch_data(query, params=None, db="clients.db"):
-    if not query:
-        return
 
-    connection = None
-    try:
-        connection = sqlite3.connect(database_path(db), timeout=30)
-        return connection.execute(query, params or ()).fetchall()
-    except sqlite3.OperationalError as op_err:
-        _show_error("Operational Error", f"An operational error occurred: {op_err}")
-    except sqlite3.IntegrityError as int_err:
-        _show_error("Integrity Error", f"An integrity error occurred: {int_err}")
-    except sqlite3.DatabaseError as db_err:
-        _show_error("Database Error", f"A database error occurred: {db_err}")
-    except Exception as e:
-        _show_error("Error", f"An unexpected error occurred: {e}")
-    finally:
-        if connection is not None:
-            connection.close()
+from core.database import query_all, execute_non_query, get_database_path
 
-def run_query(query, params=None, db="clients.db"):
-    connection = None
-    try:
-        connection = sqlite3.connect(database_path(db), timeout=30)
-        with connection:                                    # commit on success, rollback on any exception
-            connection.execute(query, params or ())
-    except sqlite3.OperationalError as op_err:
-        _show_error("Operational Error", f"An operational error occurred: {op_err}")
-    except sqlite3.IntegrityError as int_err:
-        _show_error("Integrity Error", f"An integrity error occurred: {int_err}")
-    except sqlite3.DatabaseError as db_err:
-        _show_error("Database Error", f"A database error occurred: {db_err}")
-    except Exception as e:
-        _show_error("Error", f"An unexpected error occurred: {e}")
-    finally:
-        if connection is not None:
-            connection.close()
+database_path = get_database_path
+fetch_data = query_all
+run_query = execute_non_query
 
 
 
@@ -211,6 +169,10 @@ def Top_Close(root, parent):
     # Destroy the Toplevel window.
     root.destroy()
     
+    # Run garbage collection to immediately free destroyed Tk widgets and unreferenced image buffers
+    import gc
+    gc.collect()
+
     # Now, attempt to reload data on the main application window (app_root).
     # This is wrapped in a try-except block to prevent crashes if the main
     # application frame or its methods don't exist for some reason.
@@ -232,7 +194,7 @@ def Top_Close(root, parent):
 def read_ini(section, key, file_path=None):
     """Reads a value from an .ini file. If missing, creates the section/key with None."""
 
-    DEFAULT_PATH = database_path("config.ini")
+    DEFAULT_PATH = get_database_path("config.ini")
 
     file_path = file_path or DEFAULT_PATH
     config = configparser.ConfigParser()
@@ -257,7 +219,7 @@ def read_ini(section, key, file_path=None):
 def write_ini(section, key, value="", file_path=None):
     """Writes a value to an .ini file, creating the file if it does not exist."""
     
-    DEFAULT_PATH = database_path("config.ini")
+    DEFAULT_PATH = get_database_path("config.ini")
 
     file_path = file_path or DEFAULT_PATH
     config = configparser.ConfigParser()
