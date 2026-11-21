@@ -16,6 +16,7 @@ from openpyxl import Workbook
 from openpyxl.utils import get_column_letter
 from openpyxl.styles import Font, Alignment, PatternFill
 from services.report_service import ReportRepository, ReportFilterError
+from utilities.report_pdf_generator import export_pdf_report
 
 # ================================================================================================================
 # Customer Specific & General Reports (Delegated to optimized ReportRepository)

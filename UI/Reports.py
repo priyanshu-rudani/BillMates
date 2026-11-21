@@ -321,7 +321,30 @@ def Reports_ui(parent = None):
             export_report(report_type_value, start_date_value, end_date_value, client_value)
 
     def export_as_pdf():
-        messagebox.showerror("Upcoming Feature", "Export To PDF feature is coming soon", parent=window)
+        report_type_value = report_type.get()
+        start_date_value = start_date.get()
+        end_date_value = end_date.get()
+        client_value = Client.get()
+
+        if report_type_value == "Select Report":
+            messagebox.showerror("Error", "Please select a report type", parent=window)
+            return
+
+        if start_date_value is None:
+            messagebox.showerror("Error", "Please select a Starting date", parent=window)
+            return
+
+        if end_date_value is None:
+            messagebox.showerror("Error", "Please select a Ending date", parent=window)
+            return
+
+        if client_value == "Select":
+            if report_type_value in ["Sales Reports", "Purchase Reports", "Client Payment Reports", "Client Ledger"]:
+                messagebox.showerror("Error", "Please select a client", parent=window)
+                return
+            export_pdf_report(report_type_value, start_date_value, end_date_value, parent_window=window)
+        else:
+            export_pdf_report(report_type_value, start_date_value, end_date_value, client_value, parent_window=window)
     
 
     window = tk.Toplevel(parent)

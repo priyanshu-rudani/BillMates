@@ -4,7 +4,6 @@ core/database.py
 Centralized SQLite database connection handling and query helpers.
 Separates data access from UI and path manipulation.
 """
-from __future__ import annotations
 
 import logging
 import os
