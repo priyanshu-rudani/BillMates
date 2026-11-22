@@ -1,6 +1,7 @@
 import sys
 import os
 from pathlib import Path
+from datetime import datetime
 
 if getattr(sys, 'frozen', False):  # Running as a PyInstaller EXE
     root_path = Path(sys.executable).parent
@@ -9,9 +10,9 @@ else:  # Running as a Python script
 sys.path.append(str(root_path))
 
 from utilities.path_utils import *
-from utilities.window_registry import single_instance, track
+from utilities.window_registry import _open, track
 from services.invoice_service import (
-    InvoiceService, InvoiceError, InvoiceForm, ItemInput, SALES_CONFIG, calc_item,
+    InvoiceService, InvoiceError, InvoiceForm, ItemInput, SALES_CONFIG, InvoiceConfig, calc_item,
 )
 import tkinter as tk
 from tkinter import ttk, Canvas, Entry, Text, Button, PhotoImage, messagebox, Scrollbar, filedialog, END
@@ -43,18 +44,39 @@ def _entry(window, x, y, w, h=25, **opts):
     e.place(x=x, y=y, width=w, height=h)
     return e
 
-@single_instance("new_invoice")
-def new_invoice_ui(parent=None):
 
-    config = SALES_CONFIG
+def open_invoice_window(config: InvoiceConfig, parent=None, invoice_id=None):
+    """Unified invoice creation and edit window for Customer (sales) & Supplier (purchase)."""
+    win_key = f"{config.payment_entity_type.lower()}_edit_{invoice_id}" if invoice_id is not None else (
+        "new_invoice" if config.payment_entity_type == "Client" else "new_purchase"
+    )
+    if win_key in _open:
+        w = _open[win_key]
+        if w is not None and w.winfo_exists():
+            w.deiconify()
+            w.lift()
+            w.focus_force()
+            return
+    _open[win_key] = None
+
     service = InvoiceService(config)
+
+    # Load existing invoice if editing
+    rec = None
+    if invoice_id is not None:
+        try:
+            rec = service.load_invoice(invoice_id)
+        except Exception as e:
+            _open.pop(win_key, None)
+            messagebox.showerror("Error", f"Failed to load invoice: {e}", parent=parent)
+            return
 
     ASSETS_PATH = Path(generate_path(root_path, "UI", "assets", "frame10"))
 
     def relative_to_assets(path: str) -> Path:
         return ASSETS_PATH / Path(path)
 
-    edit_mode = {'item_id': None}  # row being edited, if any
+    edit_mode = {'item_id': None}  # row being edited in draft item inputs
 
     # =============================================================================
     #  UI helpers (display only - no business logic here)
@@ -203,13 +225,13 @@ def new_invoice_ui(parent=None):
         Reference_no.delete(0, END)
         edit_mode['item_id'] = None
 
-    def save_invoice():
+    def save_invoice(close_on_success: bool = True):
         """Returns True when invoice is saved or already exists, False on failure."""
         form = InvoiceForm(invoice_no.get(), customer_name.get(), invoice_type.get(),
                            payment_type.get(), date_entry.get(), amount_paid.get(),
                            remark.get("1.0", END), Reference_no.get())
         try:
-            result = service.save_invoice(form)
+            result = service.save_invoice(form, invoice_id=rec.invoice_id if rec else None)
         except InvoiceError as err:
             show_error(err)
             return False
@@ -219,7 +241,13 @@ def new_invoice_ui(parent=None):
 
         messagebox.showinfo(result.title, result.message, parent=window)
         if result.status == "saved":
-            reset_form()
+            if rec is not None:
+                if close_on_success:
+                    service.discard_draft()
+                    _open.pop(win_key, None)
+                    Top_Close(window, parent)
+            else:
+                reset_form()
         return result.ok
 
     def export_invoice():
@@ -239,7 +267,7 @@ def new_invoice_ui(parent=None):
         )
         if not file_path:
             return
-        if not save_invoice():
+        if not save_invoice(close_on_success=False):
             return
 
         service.generate_pdf(target.client_id, target.invoice_no, file_path)
@@ -249,6 +277,11 @@ def new_invoice_ui(parent=None):
         if messagebox.askquestion("Invoice Saved", f"Invoice saved at {file_path} \nDo you want to open the PDF?",
                                   parent=window) == 'yes':
             os.startfile(file_path)
+
+        if rec is not None:
+            service.discard_draft()
+            _open.pop(win_key, None)
+            Top_Close(window, parent)
 
     def on_client_selected(event=None):
         name = customer_name.get()
@@ -262,21 +295,22 @@ def new_invoice_ui(parent=None):
         except Exception as e:
             messagebox.showinfo("Error", f"Error fetching client Data: {e}", parent=window)
             return
-        invoice_no.delete(0, END)
-        gst_no.delete(0, END)
         contect_no.delete(0, END)
         contect_no.insert(0, p.contact_display)
+        gst_no.delete(0, END)
         gst_no.insert(0, p.gst_no)
-        if p.next_invoice_no is not None:
-            invoice_no.insert(0, p.next_invoice_no)
+        if rec is None:
+            invoice_no.delete(0, END)
+            if p.next_invoice_no is not None:
+                invoice_no.insert(0, p.next_invoice_no)
 
     def on_invoice_no_change(event):
         inv, name = current()
-        if service.invoice_exists(inv, name):
+        if service.invoice_exists(inv, name, exclude_invoice_id=rec.invoice_id if rec else None):
             messagebox.showinfo("Invoice Exists", "Invoice number already exists.", parent=window)
             invoice_no.delete(0, END)
 
-    def gst_enable(event):
+    def gst_enable(event=None):
         if invoice_type.get() == config.gst_invoice_type:
             gst_no.config(state="normal")
             gst.config(state="normal")
@@ -310,16 +344,18 @@ def new_invoice_ui(parent=None):
     def on_close(*args):
         if messagebox.askyesno("Exit Confirmation", "Are you sure you want to Close?", parent=window):
             service.discard_draft()
+            _open.pop(win_key, None)
             Top_Close(window, parent)
 
     # =============================================================================
     #  UI Creation
     # =============================================================================
     window = tk.Toplevel(parent)
-    track("new_invoice", window)
+    track(win_key, window)
     center_window(window, 1280, 720)
     window.iconbitmap(generate_path("UI", "assets", "BillMates.ico"))
-    window.title(config.window_title)
+    title_prefix = "Edit " if rec else ""
+    window.title(f"{title_prefix}{config.window_title}")
     window.resizable(False, False)
     window.configure(bg="#E7EBFF")
     window.transient(parent)
@@ -382,42 +418,42 @@ def new_invoice_ui(parent=None):
     except Exception as e:
         messagebox.showinfo("Error", f"Error fetching client names: {e}", parent=window)
         client_names = []
- 
+
     customer_name = ttk.Combobox(window, values=client_names, state="readonly", font=("VarelaRound Regular", 13 * -1))
     customer_name.place(x=27.0, y=47.0, width=210.0, height=25.0)
     customer_name.bind("<<ComboboxSelected>>", on_client_selected)
- 
+
     contect_no = _entry(window, 262, 47, 180)
     invoice_no = _entry(window, 467, 47, 170)
     invoice_no.bind("<KeyRelease>", on_invoice_no_change)
- 
+
     date_entry = DateEntry(window, width=12, background="#000000", foreground="white", borderwidth=2,
                            date_pattern='dd/mm/yyyy', font=("VarelaRound Regular", 13 * -1))
     date_entry.place(x=662.0, y=47.0, width=190.0, height=25.0)
- 
+
     invoice_type = ttk.Combobox(window, values=list(config.invoice_types), state="readonly", font=FONT_VALUE)
     invoice_type.set(config.default_invoice_type)
     invoice_type.place(x=877.0, y=47.0, width=120.0, height=25.0)
     invoice_type.bind("<<ComboboxSelected>>", gst_enable)
- 
+
     gst_no = _entry(window, 1022, 47, 170)
- 
+
     # ---- Item entry row ---------------------------------------------------------
     item_code = _entry(window, 27, 122, 120)
     AutoComplete(item_code, service.item_codes, on_select=on_item_code_select)
- 
+
     item_name = _entry(window, 166, 122, 260)
     AutoComplete(item_name, service.item_names, on_select=on_item_name_select)
- 
+
     qty = tk.Spinbox(window, from_=0.0, to=100.0, increment=1, format="%.2f", width=30,
                      validate="key", validatecommand=(float_validation, "%P"), font=FONT_VALUE)
     qty.place(x=445.0, y=122.0, width=110.0, height=25.0)
- 
-    unites = ["QTY", "Meter", "Pieces", "Inch", "CM", "Roll"]
+
+    unites = ["QTY", "Meter", "Pieces", "Inch", "CM", "Roll", "Set"]
     entry_9 = ttk.Combobox(window, values=unites, state="readonly", font=FONT_VALUE)
     entry_9.current(0)
     entry_9.place(x=574.0, y=122.0, width=90.0, height=25.0)
- 
+
     num = dict(highlightthickness=1, validate="key", validatecommand=(float_validation, "%P"))
     price = _entry(window, 683, 122, 120, **num)
     discount = _entry(window, 822, 122, 110, **num)
@@ -425,25 +461,50 @@ def new_invoice_ui(parent=None):
     for w in (qty, price, gst, discount):
         w.bind("<FocusOut>", calculate_total)
         w.bind("<KeyRelease>", calculate_total)
- 
+
     item_total = _entry(window, 1080, 122, 110, fg="#000000", cursor="", highlightthickness=1, state="readonly")
- 
+
     # ---- Payment / remarks ------------------------------------------------------
     Reference_no = _entry(window, 28, 574, 240)
- 
+
     paymentMode = ["Cash", "UPI", "Net Banking", "Check", "Card"]
     payment_type = ttk.Combobox(window, values=paymentMode, state="readonly")
     payment_type.current(0)
     payment_type.place(x=303.0, y=574.0, width=160.0, height=25.0)
- 
+
     amount_paid = _entry(window, 303, 623, 160, validate="key", validatecommand=(float_validation, "%P"))
     amount_paid.bind("<FocusOut>", update_payment)
     amount_paid.bind("<KeyRelease>", update_payment)
- 
+
     amount_remain = _entry(window, 303, 672, 160, cursor="", state="readonly")
 
     remark = Text(window, bd=1, bg="#FFFFFF", fg="#000716", cursor="xterm", font=FONT_VALUE, highlightthickness=0)
     remark.place(x=28.0, y=627.0, width=240.0, height=70.0)
+
+    # Pre-populate data if editing an existing invoice
+    if rec is not None:
+        customer_name.set(rec.client_name)
+        on_client_selected()
+        invoice_no.delete(0, END)
+        invoice_no.insert(0, rec.invoice_no)
+        if rec.date:
+            try:
+                date_entry.set_date(datetime.strptime(rec.date, "%d/%m/%Y"))
+            except Exception:
+                pass
+        invoice_type.set(rec.invoice_type)
+        gst_enable(None)
+        Reference_no.delete(0, END)
+        Reference_no.insert(0, rec.reference_no)
+        payment_type.set(rec.payment_type)
+        amount_paid.delete(0, END)
+        amount_paid.insert(0, str(rec.paid))
+        remark.delete("1.0", END)
+        remark.insert("1.0", rec.remarks)
+        customer_name.config(state='disabled')
+        refresh_treeview()
+        refresh_summary()
+        update_payment()
 
     # ---- Buttons ----------------------------------------------------------------
     def make_button(img_name, command, x, y, w, h):
@@ -465,8 +526,13 @@ def new_invoice_ui(parent=None):
     window.resizable(False, False)
     window.protocol("WM_DELETE_WINDOW", on_close)
     window.bind("<Escape>", on_close)
-    # window.wait_window()
+    window.bind("<Destroy>", lambda e: _open.pop(win_key, None) if e.widget == window else None)
     window.wait_window()
+
+
+def new_invoice_ui(parent=None, invoice_id=None):
+    """Entry point for creating or editing Sales Invoices."""
+    return open_invoice_window(SALES_CONFIG, parent=parent, invoice_id=invoice_id)
 
 
 if __name__ == "__main__":

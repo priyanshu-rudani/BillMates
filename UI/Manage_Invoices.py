@@ -1014,14 +1014,41 @@ def manage_invoice_ui(parent = None):
                         return
 
 
+    def edit_item(event=None):
+        selected_item = tree.selection()
+        if not selected_item:
+            return
+        row_data = tree.item(selected_item, "values")
+        if not row_data or len(row_data) < 3:
+            return
+        invoice_no = row_data[1]
+        client_name = row_data[2]
+        client_id = get_client_id(client_name)
+        client_type = get_client_type(client_name)
+
+        if client_type == "Client":
+            rows = fetch_data("SELECT invoice_id FROM Invoices WHERE invoice_no = ? AND client_id = ?", (invoice_no, client_id))
+            if rows:
+                from UI.gui import new_invoice_ui
+                new_invoice_ui(parent=window, invoice_id=rows[0][0])
+                filter_data()
+        elif client_type == "Supplier":
+            rows = fetch_data("SELECT invoice_id FROM Purchase WHERE invoice_no = ? AND client_id = ?", (invoice_no, client_id))
+            if rows:
+                from UI.gui import new_purchase_ui
+                new_purchase_ui(parent=window, invoice_id=rows[0][0])
+                filter_data()
+
     context_menu = Menu(window, tearoff=0)
+    context_menu.add_command(label="  Edit Invoice              ", command=edit_item)
     context_menu.add_command(label="  Export as PDF             ", command=export_item)
     context_menu.add_command(label="  Delete Invoice            ", command=delete_item)
     context_menu.add_command(label="  Mark as Paid              ", command=mark_as_paid)
     context_menu.add_command(label="  Mark as Partially Paid    ", command=mark_as_Partially_paid)
 
-    # Bind right-click to Treeview
+    # Bind right-click and double-click to Treeview
     tree.bind("<Button-3>", on_right_click)
+    tree.bind("<Double-1>", edit_item)
 
     window.bind("<Return>", lambda event: filter_data())
     window.bind('<Control-s>', lambda event: export_to_excel())

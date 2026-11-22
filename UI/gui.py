@@ -17,10 +17,20 @@ def manage_clients(parent = None):
     except Exception as e:
         _show_error("Unexpected Error", f"Unexpected GUI Loading error: \n{e}")
 
-def new_purchase_ui(parent = None):
+def new_invoice_ui(parent = None, invoice_id = None):
     try:
-        import UI.Add_purchase
-        UI.Add_purchase.new_purchase_ui(parent)
+        from services.invoice_service import SALES_CONFIG
+        from UI.Add_Invoice import open_invoice_window
+        open_invoice_window(SALES_CONFIG, parent=parent, invoice_id=invoice_id)
+
+    except Exception as e:
+        _show_error("Unexpected Error", f"Unexpected GUI Loading error: \n{e}")
+
+def new_purchase_ui(parent = None, invoice_id = None):
+    try:
+        from services.invoice_service import PURCHASE_CONFIG
+        from UI.Add_Invoice import open_invoice_window
+        open_invoice_window(PURCHASE_CONFIG, parent=parent, invoice_id=invoice_id)
     except Exception as e:
         _show_error("Unexpected Error", f"Unexpected GUI Loading error: \n{e}")
  
@@ -77,12 +87,6 @@ def manage_payments(parent = None):
     except Exception as e:
         _show_error("Unexpected Error", f"Unexpected GUI Loading error: \n{e}")
 
-def new_invoice_ui(parent = None):
-    try:
-        import UI.Add_Invoice
-        UI.Add_Invoice.new_invoice_ui(parent)
-    except Exception as e:
-        _show_error("Unexpected Error", f"Unexpected GUI Loading error: \n{e}")
 
 def company_info(Mode, parent = None):
     try:

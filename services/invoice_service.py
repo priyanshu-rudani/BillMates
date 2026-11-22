@@ -16,6 +16,7 @@ from datetime import datetime, timedelta
 from typing import Callable, List, Optional
 
 from utilities.path_utils import fetch_data, run_query, get_client_id, read_ini
+from core.database import get_db_connection, query_one, query_all, execute_non_query, execute_query
 from utilities.invoice_generator import create_invoice
 
 DATE_FMT = "%d/%m/%Y"
@@ -229,6 +230,28 @@ class ItemMaster:
 
 
 @dataclass
+class InvoiceRecord:
+    """Loaded invoice record used to pre-populate edit form."""
+    invoice_id: int
+    invoice_no: int
+    invoice_type: str
+    date: str
+    due_date: str
+    client_id: int
+    client_name: str
+    client_contact: str
+    client_gst: str
+    total: float
+    paid: float
+    remaining: float
+    remarks: str
+    reference_no: str
+    payment_type: str
+    paid_status: str
+    items: List[DraftItem] = field(default_factory=list)
+
+
+@dataclass
 class InvoiceForm:
     invoice_no: str
     client_name: str
@@ -356,13 +379,164 @@ class InvoiceService:
     def item_by_name(self, name: str) -> Optional[ItemMaster]:
         return self._lookup("item_name", name)
 
-    def invoice_exists(self, invoice_no: str, client_name: str) -> bool:
+    def invoice_exists(self, invoice_no: str, client_name: str, exclude_invoice_id: Optional[int] = None) -> bool:
         cid = self.client_id(client_name)
         if not invoice_no or not cid:
             return False
-        res = fetch_data(f"SELECT COUNT(*) FROM {self.cfg.invoices_table} WHERE invoice_no = ? AND client_id = ?",
-                         (invoice_no, cid))
-        return res[0][0] > 0
+        if exclude_invoice_id is not None:
+            res = fetch_data(f"SELECT COUNT(*) FROM {self.cfg.invoices_table} WHERE invoice_no = ? AND client_id = ? AND invoice_id != ?",
+                             (invoice_no, cid, exclude_invoice_id))
+        else:
+            res = fetch_data(f"SELECT COUNT(*) FROM {self.cfg.invoices_table} WHERE invoice_no = ? AND client_id = ?",
+                             (invoice_no, cid))
+        return bool(res and res[0][0] > 0)
+
+    def load_invoice(self, invoice_id_or_obj: Union[int, str, dict]) -> InvoiceRecord:
+        """
+        Loads an existing invoice and its line items, pre-populating self.draft.
+        Accepts integer invoice_id, string invoice_id, or a dict containing:
+          - {'invoice_id': id} OR
+          - {'invoice_no': no, 'client_id': cid} OR
+          - {'invoice_no': no, 'client_name': name}
+        """
+        c = self.cfg
+        inv_id: Optional[int] = None
+        inv_no: Optional[int] = None
+        cid: Optional[int] = None
+
+        if isinstance(invoice_id_or_obj, dict):
+            if "invoice_id" in invoice_id_or_obj and invoice_id_or_obj["invoice_id"]:
+                inv_id = int(invoice_id_or_obj["invoice_id"])
+            elif "invoice_no" in invoice_id_or_obj:
+                inv_no = int(invoice_id_or_obj["invoice_no"])
+                if "client_id" in invoice_id_or_obj and invoice_id_or_obj["client_id"]:
+                    cid = int(invoice_id_or_obj["client_id"])
+                elif "client_name" in invoice_id_or_obj and invoice_id_or_obj["client_name"]:
+                    cid = self.client_id(invoice_id_or_obj["client_name"])
+        elif isinstance(invoice_id_or_obj, (int, str)):
+            try:
+                inv_id = int(str(invoice_id_or_obj).strip())
+            except ValueError:
+                raise InvoiceError("Invalid invoice identifier.", "Load Error")
+        else:
+            raise InvoiceError("Unsupported invoice identifier type.", "Load Error")
+
+        if inv_id is not None:
+            sql_header = f"""
+                SELECT 
+                    i.invoice_id, i.invoice_no, i.Invoice_type, i.date, i.due_date,
+                    i.client_id, c.name, c.contact_no, c.gst,
+                    COALESCE(i.total, 0.0), COALESCE(i.paid, 0.0), COALESCE(i.remaining, 0.0),
+                    COALESCE(i.remarks, ''), COALESCE(i.reference_no, ''),
+                    COALESCE(i.payment_type, 'Cash'), COALESCE(i.paid_status, 'Unpaid')
+                FROM {c.invoices_table} i
+                JOIN Clients c ON i.client_id = c.id
+                WHERE i.invoice_id = ?
+            """
+            rows = fetch_data(sql_header, (inv_id,))
+        elif inv_no is not None and cid is not None:
+            sql_header = f"""
+                SELECT 
+                    i.invoice_id, i.invoice_no, i.Invoice_type, i.date, i.due_date,
+                    i.client_id, c.name, c.contact_no, c.gst,
+                    COALESCE(i.total, 0.0), COALESCE(i.paid, 0.0), COALESCE(i.remaining, 0.0),
+                    COALESCE(i.remarks, ''), COALESCE(i.reference_no, ''),
+                    COALESCE(i.payment_type, 'Cash'), COALESCE(i.paid_status, 'Unpaid')
+                FROM {c.invoices_table} i
+                JOIN Clients c ON i.client_id = c.id
+                WHERE i.invoice_no = ? AND i.client_id = ?
+            """
+            rows = fetch_data(sql_header, (inv_no, cid))
+        else:
+            raise InvoiceError("Insufficient parameters to locate invoice.", "Load Error")
+
+        if not rows:
+            raise InvoiceError(f"Invoice not found in {c.invoices_table}.", "Not Found", "info")
+
+        r = rows[0]
+        rec_inv_id = int(r[0])
+        rec_inv_no = str(r[1]) if r[1] is not None else ""
+        rec_inv_type = r[2] or c.default_invoice_type
+        rec_date = r[3] or ""
+        rec_due_date = r[4] or ""
+        rec_cid = int(r[5])
+        rec_cname = r[6] or ""
+        rec_contact = str(r[7] or "")
+        rec_gst = r[8] or ""
+        rec_total = float(r[9] or 0.0)
+        rec_paid = float(r[10] or 0.0)
+        rec_remaining = float(r[11] or 0.0)
+        rec_remarks = r[12] or ""
+        rec_ref = r[13] or ""
+        rec_pay_type = r[14] or "Cash"
+        rec_paid_status = r[15] or "Unpaid"
+
+        contact_display = f"91+ {rec_contact[:5]} {rec_contact[5:]}" if len(rec_contact) == 10 else rec_contact
+
+        sql_items = f"""
+            SELECT 
+                id, invoice_no, client_id, item_code, item_name, quantity,
+                unit, price, subtotal, GST_Rate, taxes, discount_amount,
+                discount_percent, Total
+            FROM {c.items_table}
+            WHERE invoice_no = ? AND client_id = ?
+            ORDER BY id ASC
+        """
+        item_rows = fetch_data(sql_items, (rec_inv_no, rec_cid))
+
+        self.draft.clear()
+        self.draft._next_id = 1
+        loaded_items = []
+        for it in item_rows:
+            code = str(it[3] or "")
+            name = str(it[4] or "")
+            qty = float(it[5] or 0.0)
+            unit = str(it[6] or "QTY")
+            price = float(it[7] or 0.0)
+            subtotal = float(it[8] or 0.0)
+            gst_rate = float(it[9] or 0.0)
+            taxes = float(it[10] or 0.0)
+            disc_amt = float(it[11] or 0.0)
+            disc_pct = float(it[12] or 0.0)
+            item_total = float(it[13] or 0.0)
+
+            d = DraftItem(
+                row_id=self.draft._next_id,
+                item_code=code,
+                item_name=name,
+                qty=qty,
+                unit=unit,
+                price=price,
+                subtotal=subtotal,
+                gst_rate=gst_rate,
+                taxes=taxes,
+                discount_percent=disc_pct,
+                discount_amount=disc_amt,
+                total=item_total,
+            )
+            self.draft._next_id += 1
+            self.draft.items.append(d)
+            loaded_items.append(d)
+
+        return InvoiceRecord(
+            invoice_id=rec_inv_id,
+            invoice_no=rec_inv_no,
+            invoice_type=rec_inv_type,
+            date=rec_date,
+            due_date=rec_due_date,
+            client_id=rec_cid,
+            client_name=rec_cname,
+            client_contact=contact_display,
+            client_gst=rec_gst,
+            total=rec_total,
+            paid=rec_paid,
+            remaining=rec_remaining,
+            remarks=rec_remarks,
+            reference_no=rec_ref,
+            payment_type=rec_pay_type,
+            paid_status=rec_paid_status,
+            items=loaded_items,
+        )
 
     # ---- validation ---------------------------------------------------------
     def _validate_header(self, invoice_no: str, client_name: str, date_str: str) -> None:
@@ -452,7 +626,7 @@ class InvoiceService:
                               round_off=round(round_off, 2), grand_total=round(grand_total, 2))
 
     # ---- save -----------------------------------------------------
-    def save_invoice(self, f: InvoiceForm) -> SaveResult:
+    def save_invoice(self, f: InvoiceForm, invoice_id: Optional[int] = None) -> SaveResult:
         c = self.cfg
         inv_no = (f.invoice_no or "").strip()
         self._validate_header(inv_no, f.client_name, f.date)
@@ -464,6 +638,8 @@ class InvoiceService:
         due_date = (inv_date + timedelta(days=c.due_days)).strftime(DATE_FMT)
 
         cid = self.client_id(f.client_name)
+        if not cid:
+            raise InvoiceError(f"{c.client_label} '{f.client_name}' not found.", "Client Error")
         total = self.total()
         try:
             paid = float(f.amount_paid) if f.amount_paid else 0.0
@@ -473,35 +649,101 @@ class InvoiceService:
         if len(self.draft) == 0:
             raise InvoiceError("Enter at least 1 Item to save the Invoice", "Save Error", "info")
 
-        if self.invoice_exists(inv_no, f.client_name):
+        if self.invoice_exists(inv_no, f.client_name, exclude_invoice_id=invoice_id):
             return SaveResult("exists", "Invoice Exists", f"Invoice number {inv_no} already exists.")
 
         remarks = (f.remarks or "").strip() or " "
         reference = f.reference_no or " "
         remaining = total - paid
+        status = payment_status(total, paid)
 
-        run_query(f"""INSERT INTO {c.invoices_table}
-                      (invoice_no, Invoice_type, date, due_date, client_id, total, paid, remaining,
-                       remarks, reference_no, payment_type, paid_status)
-                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                  (inv_no, f.invoice_type, f.date, due_date, cid, total, paid, remaining,
-                   remarks, reference, f.payment_type, payment_status(total, paid)))
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            if invoice_id is not None:
+                # Update mode: reverse previous impact and apply new
+                cursor.execute(f"SELECT invoice_no, client_id, total, paid FROM {c.invoices_table} WHERE invoice_id = ?", (invoice_id,))
+                old_row = cursor.fetchone()
+                if not old_row:
+                    raise InvoiceError(f"Invoice ID {invoice_id} not found.", "Not Found")
+                old_inv_no, old_cid, old_total, old_paid = old_row
+                old_total = float(old_total or 0.0)
 
-        for d in self.draft.items:
-            run_query(f"INSERT INTO {c.items_table} ({self._ITEM_COLS}) VALUES ({', '.join('?' * 13)})",
-                      self._row_values(inv_no, cid, d))
+                # Reconcile client closing balance
+                if old_cid == cid:
+                    delta = total - old_total
+                    if delta != 0.0:
+                        cursor.execute("UPDATE Clients SET closing_bal = COALESCE(closing_bal, 0) + ? WHERE id = ?",
+                                       (float(c.balance_sign * delta), cid))
+                else:
+                    cursor.execute("UPDATE Clients SET closing_bal = COALESCE(closing_bal, 0) - ? WHERE id = ?",
+                                   (float(c.balance_sign * old_total), old_cid))
+                    cursor.execute("UPDATE Clients SET closing_bal = COALESCE(closing_bal, 0) + ? WHERE id = ?",
+                                   (float(c.balance_sign * total), cid))
 
-        run_query("UPDATE Clients SET closing_bal = COALESCE(closing_bal, 0) + ? WHERE id = ?",
-                  (float(c.balance_sign * total), cid))
+                # Update invoice header
+                cursor.execute(f"""UPDATE {c.invoices_table}
+                                  SET invoice_no = ?, Invoice_type = ?, date = ?, due_date = ?,
+                                      client_id = ?, total = ?, paid = ?, remaining = ?,
+                                      remarks = ?, reference_no = ?, payment_type = ?, paid_status = ?
+                                  WHERE invoice_id = ?""",
+                               (inv_no, f.invoice_type, f.date, due_date, cid, total, paid, remaining,
+                                remarks, reference, f.payment_type, status, invoice_id))
 
-        if paid > 0:
-            run_query("""INSERT INTO Payments
-                         (entity_id, entity_type, date, total_amount, payment_mode, reference_no, Expanse_type)
-                         VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                      (cid, c.payment_entity_type, f.date, paid, f.payment_type, inv_no, c.payment_category))
+                # Replace line items
+                cursor.execute(f"DELETE FROM {c.items_table} WHERE invoice_no = ? AND client_id = ?",
+                               (old_inv_no, old_cid))
+                for d in self.draft.items:
+                    cursor.execute(f"INSERT INTO {c.items_table} ({self._ITEM_COLS}) VALUES ({', '.join('?' * 13)})",
+                                   self._row_values(inv_no, cid, d))
 
-        self.draft.clear()
-        return SaveResult("saved", "Invoice Saved", f"Invoice {inv_no} has been saved successfully.")
+                # Synchronize initial payment entry in Payments table
+                cursor.execute("""SELECT payment_id FROM Payments
+                                  WHERE reference_no = ? AND entity_id = ? AND Expanse_type = ?""",
+                               (str(old_inv_no), old_cid, c.payment_category))
+                p_row = cursor.fetchone()
+                if paid > 0:
+                    if p_row:
+                        cursor.execute("""UPDATE Payments
+                                          SET entity_id = ?, entity_type = ?, date = ?, total_amount = ?,
+                                              payment_mode = ?, reference_no = ?, Expanse_type = ?
+                                          WHERE payment_id = ?""",
+                                       (cid, c.payment_entity_type, f.date, paid, f.payment_type, str(inv_no), c.payment_category, p_row[0]))
+                    else:
+                        cursor.execute("""INSERT INTO Payments
+                                          (entity_id, entity_type, date, total_amount, payment_mode, reference_no, Expanse_type)
+                                          VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                                       (cid, c.payment_entity_type, f.date, paid, f.payment_type, str(inv_no), c.payment_category))
+                else:
+                    if p_row:
+                        cursor.execute("DELETE FROM Payments WHERE payment_id = ?", (p_row[0],))
+
+                self.draft.clear()
+                return SaveResult("saved", "Invoice Updated", f"Invoice {inv_no} has been updated successfully.")
+
+            else:
+                # Creation mode
+                cursor.execute(f"""INSERT INTO {c.invoices_table}
+                              (invoice_no, Invoice_type, date, due_date, client_id, total, paid, remaining,
+                               remarks, reference_no, payment_type, paid_status)
+                              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                          (inv_no, f.invoice_type, f.date, due_date, cid, total, paid, remaining,
+                           remarks, reference, f.payment_type, status))
+
+                for d in self.draft.items:
+                    cursor.execute(f"INSERT INTO {c.items_table} ({self._ITEM_COLS}) VALUES ({', '.join('?' * 13)})",
+                                  self._row_values(inv_no, cid, d))
+
+                cursor.execute("UPDATE Clients SET closing_bal = COALESCE(closing_bal, 0) + ? WHERE id = ?",
+                              (float(c.balance_sign * total), cid))
+
+                if paid > 0:
+                    cursor.execute("""INSERT INTO Payments
+                                 (entity_id, entity_type, date, total_amount, payment_mode, reference_no, Expanse_type)
+                                 VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                              (cid, c.payment_entity_type, f.date, paid, f.payment_type, str(inv_no), c.payment_category))
+
+                self.draft.clear()
+                return SaveResult("saved", "Invoice Saved", f"Invoice {inv_no} has been saved successfully.")
 
     # ---- export -------------------------------------------------------------
     def prepare_export(self, invoice_no: str, client_name: str, date_str: str) -> ExportTarget:
