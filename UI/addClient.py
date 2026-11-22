@@ -14,10 +14,6 @@ from utilities.text import States
 import re
 
 def new_client_ui(parent = None):
-    ASSETS_PATH = Path(generate_path(root_path, "UI", "assets", "frame5"))
-
-    def relative_to_assets(path: str) -> Path:
-        return ASSETS_PATH / Path(path)
 
     def update_text(event):
 
@@ -26,6 +22,19 @@ def new_client_ui(parent = None):
         if selected_value == "Staff":
             canvas.itemconfig(text_gst, text="Position")
             canvas.itemconfig(Heading, text="Add Staff")
+            submit_button.config(text="Add Staff")
+
+        elif selected_value == "Client":
+            canvas.itemconfig(text_gst, text="GST No. ")
+            canvas.itemconfig(Heading, text="Add Client")
+            submit_button.config(text="Add Client")
+
+        elif selected_value == "Supplier":
+            canvas.itemconfig(text_gst, text="GST No. ")
+            canvas.itemconfig(Heading, text="Add Supplier")
+            submit_button.config(text="Add Supplier")
+
+
 
     def add_client_to_db():
         # Fetch data from entry fields
@@ -263,8 +272,16 @@ def new_client_ui(parent = None):
         height=25.0
     )
 
-    float_validation = window.register(lambda value: value == "" or value.replace(".", "", 1).isdigit())
-    Balance = Entry(window,
+    # float_validation = window.register(lambda value: value == "" or value.replace(".", "", 1).isdigit())
+    def is_valid_signed_float(value: str) -> bool:
+        if value in ("", "+", "-", ".", "+.", "-."):
+            return True
+        unsigned = value[1:] if value[0] in ("+", "-") else value
+        return unsigned.replace(".", "", 1).isdigit()
+
+    float_validation = window.register(is_valid_signed_float)
+    Balance = Entry(
+        window,
         bd=1,
         bg="#FFFFFF",
         fg="#000716",
@@ -292,16 +309,19 @@ def new_client_ui(parent = None):
     )
 
 
-    button_image_1 = PhotoImage(
-        file=relative_to_assets("button_1.png"))
-    button_1 = Button(window,
-        image=button_image_1,
-        borderwidth=0,
-        highlightthickness=0,
-        command=add_client_to_db,
-        relief="flat"
+    submit_button = Button(window,
+        text="Add Client",
+        bg="#4F59C1",
+        fg="#FFFFFF",
+        activebackground="#3F48A6",
+        activeforeground="#FFFFFF",
+        font=("VarelaRound Regular", 11 * -1),
+        bd=0,
+        relief="flat",
+        cursor="hand2",
+        command=add_client_to_db
     )
-    button_1.place(
+    submit_button.place(
         x=95.0,
         y=480.0,
         width=290.0,
