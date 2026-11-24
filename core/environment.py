@@ -31,16 +31,16 @@ class EnvironmentSetup:
     def ensure_directories(self):
         db_folder = database_path()
         if not os.path.exists(db_folder):
-            os.makedirs(os.path.dirname(db_folder), exist_ok=True)
+            os.makedirs(db_folder, exist_ok=True)
 
     def ensure_database(self):
-
-        if not os.path.exists(self.db_path):
-            try:
-                create_database()
-            except ImportError:
-                messagebox.showerror("Error", "Failed to import 'Database' module. Please reinstall the software.")
+        try:
+            if not create_database():
+                messagebox.showerror("Error", "Failed to initialize application databases.")
                 sys.exit(1)
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to initialize database: {e}")
+            sys.exit(1)
 
 
     def ensure_profile(self):

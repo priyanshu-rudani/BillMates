@@ -9,7 +9,8 @@ else:  # Running as a Python script
     root_path = Path(__file__).parent.parent
 sys.path.append(str(root_path))
 
-from utilities.path_utils import database_path, _show_error
+from utilities.path_utils import _show_error
+from core.database import get_database_path
 import sqlite3
 
 try:
@@ -167,14 +168,10 @@ def _init_database(db_file: str, tables: dict) -> None:
     current = "<connect>"
     conn = None
     try:
-        db_path = Path(database_path(db_file))
+        db_path = Path(get_database_path(db_file))
         db_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # isolation_level=None -> we control BEGIN/COMMIT explicitly,
-        # so DDL is truly transactional (Atomicity).
-        conn = sqlite3.connect(db_path, timeout=30, isolation_level=None)
-        conn.execute("PRAGMA synchronous = FULL")      # Durability
-        conn.execute("BEGIN IMMEDIATE")                # lock early, fail fast
+        conn = sqlite3.connect(db_path, timeout=30)
 
         try:
             for current, ddl in tables.items():
@@ -184,10 +181,13 @@ def _init_database(db_file: str, tables: dict) -> None:
                 for idx_sql in REPORT_INDEXES:
                     conn.execute(idx_sql)
 
-            conn.execute("COMMIT")
+            conn.commit()
         except BaseException:
-            if conn.in_transaction:
-                conn.execute("ROLLBACK")
+            try:
+                if conn.in_transaction:
+                    conn.rollback()
+            except Exception:
+                pass
             raise
 
     except sqlite3.Error as e:

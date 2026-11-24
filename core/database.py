@@ -62,6 +62,7 @@ def _ensure_report_indexes(conn: sqlite3.Connection, db_name: str) -> None:
 def get_db_connection(db_name: str = "clients.db") -> Generator[sqlite3.Connection, None, None]:
     """Context manager for SQLite connections with transaction management."""
     db_file = get_database_path(db_name)
+    Path(db_file).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_file, timeout=30)
     _ensure_report_indexes(conn, db_name)
     try:
