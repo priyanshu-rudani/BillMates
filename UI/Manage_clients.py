@@ -33,12 +33,12 @@ def manage_clients(parent = None):
                 widget.destroy()
 
         if selected_option == "Name":
-            # Create a Combobox for Client Names
-            client_names = fetch_client_names('Client')
+            # Fetch all party names (Clients, Suppliers, Staff)
+            client_names = [r[0] for r in fetch_data("SELECT DISTINCT name FROM Clients ORDER BY name ASC")]
             entry_2 = Combobox(
                 window,
                 values=client_names,
-                state="readonly",  # Read-only mode to prevent manual input
+                state="readonly",
                 font=("VarelaRound Regular", 10)
             )
             entry_2.place(
@@ -48,6 +48,7 @@ def manage_clients(parent = None):
                 height=25.0
             )
             entry_2.set("Select")
+            entry_2.bind("<<ComboboxSelected>>", lambda e: search())
 
         elif selected_option == "Type":
             client_types = ["Client", "Supplier", "Staff"]
@@ -64,6 +65,7 @@ def manage_clients(parent = None):
                 height=25.0
             )
             entry_2.set("Select")     
+            entry_2.bind("<<ComboboxSelected>>", lambda e: search())
 
         else:
             entry_2 = Entry(
@@ -80,139 +82,108 @@ def manage_clients(parent = None):
                 width=325.0,
                 height=25.0
             )
+            entry_2.bind("<Return>", lambda e: search())
 
             if selected_option == "Contact Number":
-                quary = """SELECT DISTINCT LOWER(contact_no) FROM Clients"""
+                quary = """SELECT DISTINCT contact_no FROM Clients WHERE contact_no IS NOT NULL AND contact_no != ''"""
             elif selected_option == "City":
-                quary = """SELECT DISTINCT LOWER(city) FROM Clients"""
+                quary = """SELECT DISTINCT city FROM Clients WHERE city IS NOT NULL AND city != ''"""
             elif selected_option == "ID":
-                quary = """SELECT DISTINCT LOWER(id) FROM Clients"""
+                quary = """SELECT DISTINCT id FROM Clients ORDER BY id ASC"""
             else:
                 quary = None
                 
-            if not selected_option == "All":
-                data = [row[0] for row in fetch_data(quary)]
-                listbox = tk.Listbox(window, font=("VarelaRound Regular", 14 * -1), height=int(len(data)))
+            if quary is not None:
+                data = [str(row[0]) for row in fetch_data(quary)]
+                listbox = tk.Listbox(window, font=("VarelaRound Regular", 14 * -1), height=min(len(data), 6))
                 SearchBox(entry_2, listbox, data)
 
 
+    def refresh_table():
+        query = "SELECT id, name, contact_no, gst, city, state, client_type, closing_bal FROM Clients"
+        data = fetch_data(query)
+        populate_tree(data)
+
+    def open_edit_party(selected_item=None):
+        if not selected_item:
+            selected_item = tree.selection()
+            if selected_item:
+                selected_item = selected_item[0]
+        if not selected_item:
+            return
+        item_values = tree.item(selected_item, "values")
+        if not item_values:
+            return
+        client_id = item_values[0]
+        new_client_ui(parent=window, client_id=client_id, on_saved=refresh_table)
+
     def on_double_click(event):
-        item = tree.identify_row(event.y)  # Get selected row
-        col = tree.identify_column(event.x)  # Get selected column
-
-        if not item or not col:  # Ensure user clicked on a valid cell
+        item = tree.identify_row(event.y)
+        if not item:
             return
+        tree.selection_set(item)
+        open_edit_party(item)
 
-        col_index = int(col[1:]) - 1  # Convert column '#2' to index 1, etc.
 
-        if col_index == 0 or col_index == 6:  # Prevent editing the "ID" column
-            return
-
-        # Get current value & column name
-        cur_value = tree.item(item, "values")[col_index]
-        col_sql = sql_table[col_index]  # Get actual SQL column name
-
-        # Get cell coordinates
-        bbox = tree.bbox(item, col_index)
-        if not bbox:  # Prevent errors if bbox is empty
-            return
-
-        # Create Entry widget inside Treeview
-        entry = tk.Entry(tree, font=("VarelaRound Regular", 12 * -1))
-        entry.insert(0, cur_value)
-        entry.focus()
-        entry.place(x=bbox[0], y=bbox[1], width=bbox[2], height=bbox[3])
-
-        # Function to save new value
-        def save_edit(event):
-            new_value = entry.get().strip()
-
-            if new_value == cur_value or new_value == "":  # Ignore unchanged or empty values
-                entry.destroy()
-                return
-
-            tree.set(item, column=columns[col_index], value=new_value)
-            entry.destroy()  # Remove entry field
-
-            # Update database
-            row_id = tree.item(item, "values")[0]  # Get ID column
-            run_query(f"UPDATE Clients SET {col_sql} = ? WHERE id = ?", (new_value, row_id))
-
-        entry.bind("<Return>", save_edit)  # Save on Enter
-        entry.bind("<FocusOut>", lambda e: entry.destroy())  # Destroy on focus loss
-
+    def populate_tree(records):
+        tree.delete(*tree.get_children())
+        for row in records:
+            tree.insert("", "end", values=row)
 
     def search():
         try:
-            global entry_2
-            type = entry_1.get()
-            search = entry_2.get()
+            search_type = entry_1.get().strip() if entry_1.get() else ""
+            search_term = entry_2.get().strip() if entry_2 and entry_2.get() else ""
 
-            if not type or type == "Select":
-                return
-            
-            if type == "Select" and search == "":
+            if not search_type or search_type == "Select":
                 return
 
-            query_map = {
-                "ID": "id",
-                "Name": "name",
-                "Contact Number": "contact_no",
-                "City": "city",
-                "Type": "client_type"
-            }
+            base_query = "SELECT id, name, contact_no, gst, city, state, client_type, closing_bal FROM Clients"
 
-            if type == "All":
-                query = f"SELECT id, name, contact_no, gst, city, state, client_type, closing_bal FROM Clients"
-                result = fetch_data(query)
-
-            else: 
-                query = f"SELECT id, name, contact_no, gst, city, state, client_type, closing_bal FROM Clients WHERE {query_map[type]} = '{search}'"
-                result = fetch_data(query)
-            
-            # Clear current treeview data
-            tree.delete(*tree.get_children())
-
-            # Insert the filtered data into the treeview
-            if result:
-                for row in result:
-                    tree.insert("", "end", values=row)
+            if search_type == "All":
+                result = fetch_data(base_query)
             else:
-                messagebox.showinfo("Error", f"No result Found", parent=window)
+                query_map = {
+                    "ID": "id",
+                    "Name": "name",
+                    "Contact Number": "contact_no",
+                    "City": "city",
+                    "Type": "client_type"
+                }
+
+                column = query_map.get(search_type)
+                if not column:
+                    return
+
+                if not search_term or search_term == "Select":
+                    # If field is blank, show all records rather than erroring out
+                    result = fetch_data(base_query)
+                elif search_type == "ID":
+                    # Exact numeric/ID match
+                    query = f"{base_query} WHERE id = ?"
+                    result = fetch_data(query, (search_term,))
+                elif search_type == "Type":
+                    # Exact category match (Client, Supplier, Staff)
+                    query = f"{base_query} WHERE client_type = ?"
+                    result = fetch_data(query, (search_term,))
+                else:
+                    # Case-insensitive partial matching for Name, Contact Number, City
+                    query = f"{base_query} WHERE {column} LIKE ?"
+                    result = fetch_data(query, (f"%{search_term}%",))
+
+            populate_tree(result)
+
+            if not result:
+                messagebox.showinfo("No Results", "No matching clients found.", parent=window)
+
         except Exception as e:
-                messagebox.showinfo("Error", f"Error fetching clients: {e}", parent=window)
-        
+            messagebox.showerror("Error", f"Error searching clients: {e}", parent=window)
 
     def reset():
-        entry_1.delete(0, tk.END)
         entry_1.set("Select")
-        
-        for widget in window.winfo_children():
-            if widget.winfo_name() == 'entry_2':
-                widget.destroy()
-
-        entry_2 = Entry(
-            window,
-            bd=1,
-            relief="solid",
-            bg="#FFFFFF",
-            fg="#000716",
-            highlightthickness=0
-        )
-        entry_2.place(
-            x=340.0,
-            y=53.0,
-            width=325.0,
-            height=25.0
-        )
-
-        tree.delete(*tree.get_children())
-
-        query = """SELECT id, name, contact_no, gst, city, state, client_type, closing_bal FROM Clients"""
-        data = fetch_data(query)
-
-        for row in data:
-            tree.insert("", "end", values=row)
+        update_search_field(None)
+        data = fetch_data("SELECT id, name, contact_no, gst, city, state, client_type, closing_bal FROM Clients")
+        populate_tree(data)
 
 
     def delete_row(selected_item):
@@ -239,13 +210,16 @@ def manage_clients(parent = None):
                 messagebox.showerror("Error", f"Failed to delete Client: {e}", parent=window)
 
     def show_right_click_menu(event):
-        # Get selected item
+        # Identify row under cursor if not already selected
+        row_id = tree.identify_row(event.y)
+        if row_id:
+            tree.selection_set(row_id)
         selected_item = tree.selection()
         
         if selected_item:
-            # Create the context menu
             menu = tk.Menu(window, tearoff=0)
-            menu.add_command(label="Delete", command=lambda: delete_row(selected_item))
+            menu.add_command(label="Edit", command=lambda: open_edit_party(selected_item[0]))
+            menu.add_command(label="Delete", command=lambda: delete_row(selected_item[0]))
             menu.post(event.x_root, event.y_root)
 
 
@@ -369,7 +343,7 @@ def manage_clients(parent = None):
         image=button_image_3,
         borderwidth=0,
         highlightthickness=0,
-        command=new_client_ui,
+        command=lambda: new_client_ui(parent=window, on_saved=refresh_table),
         relief="flat"
     )
     button_3.place(
