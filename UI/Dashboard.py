@@ -1,563 +1,85 @@
+"""
+UI/Dashboard.py
+---------------
+Main Billing & Analytics Dashboard application orchestrator (Overview only).
+Operates exclusively on real SQLite database records and provides a clean,
+spacious layout with conditional vertical scrolling for smaller viewports.
+Preserves full compatibility with core.environment.EnvironmentSetup and
+utilities.path_utils.Top_Close.
+"""
+
 import sys
-from pathlib import Path
-
-from utilities.path_utils import (
-    _show_error, center_window, generate_path, read_ini, get_dates_between
-)
-from core.database import query_all
-
+import threading
+import time
 import tkinter as tk
-from tkinter import Frame, Tk, Button, Menu, ttk
-from matplotlib.figure import Figure
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-import matplotlib.pyplot as plt
-from datetime import datetime, timedelta, date
-from PIL import Image, ImageTk
-from utilities.GenerateReport import export_report
-from services.report_service import ReportRepository
-
-from UI.gui import *
-
-
-class HeaderFrame(Frame):
-    def __init__(self, master, **options):
-        super().__init__(master, **options)
-
-        heading = tk.Label(self, text="Dashboard", fg="#151D48", bg=self.cget("bg"), font=("Poppins SemiBold", 20 * -1))
-        heading.pack(side="left", pady=(5, 0), padx=(30, 0))
-
-        UserName = tk.Label(self, text=read_ini("PROFILE", "name"), fg="#151D48", bg=self.cget("bg"), font=("Poppins SemiBold", 18 * -1))
-        UserName.pack(side="right", pady=(5, 0), padx=(0, 30))
-
-class Sidebar(Frame):
-    def __init__(self, master, menu_data, frame_width, button_height=20, button_spacing=0, icon_size=(16, 16), inner_padx=(10, 10), inner_pady=(0, 0), bg ="#4F59C1", **options):
-        super().__init__(master, width=frame_width, bg=bg,**options)
-
-        self.parent_root = master # Keep a reference to the top-level window for commands
-        self.menu_data = menu_data
-        self.frame_width = frame_width
-        self.button_height = button_height
-        self.button_spacing = button_spacing
-        self.icon_size = icon_size
-        self.bg = bg
-        self._button_icons = [] # List to hold PhotoImage references to prevent garbage collection
-
-        self.pack_propagate(False)
-
-        self._inner_content_frame = Frame(self, bg=self["bg"]) # Use the same background as the sidebar
-        self._inner_content_frame.pack(
-            fill="both",
-            expand=True,
-            padx=inner_padx, # Apply horizontal inner padding here
-            pady=inner_pady  # Apply vertical inner padding (tuple allowed here)
-        )
-        # Prevent the inner frame from shrinking, so it fills the padded space
-        self._inner_content_frame.pack_propagate(False)
-
-        self._build_menu_items()
-
-
-    def _toggle_submenu(self, menu, button):
-        """
-        Calculates the position relative to the button and posts the submenu.
-        """
-        # Get the absolute x and y coordinates of the button's top-left corner
-        # Then add the button's width to get the x-coordinate for the right side
-        x = button.winfo_rootx() + button.winfo_width()
-        y = button.winfo_rooty() # Use the button's absolute y-coordinate
-        menu.post(x, y)
-
-    def _load_icon(self, icon_path):
-        """Loads and resizes an image file for a button, returning a PhotoImage object."""
-        try:
-            img = Image.open(icon_path) # Open image using PIL
-            img = img.resize(self.icon_size, Image.Resampling.LANCZOS) # Resize image with high quality
-            photo_img = ImageTk.PhotoImage(img) # Convert to PhotoImage for Tkinter
-            return photo_img
-        except FileNotFoundError:
-            messagebox.showerror("Icon not found", f"Icon file not found at '{icon_path}'.", parent=self)
-            return None
-        except Exception as e:
-            _show_error("Icon Error", f"Unable to load icon '{icon_path}'.", parent=self, exc=e)
-            return None
-
-    def _build_menu_items(self):
-        top_buttons_data = []
-        bottom_buttons_data = []
-
-        for item_data in self.menu_data:
-            if item_data.get("pack_side") == "bottom":
-                bottom_buttons_data.append(item_data)
-            else:
-                top_buttons_data.append(item_data)
-
-        # Process and pack 'top' buttons. They will stack from the top down.
-        for item_data in top_buttons_data:
-            self._create_and_pack_button(item_data, tk.TOP)
-
-        # Process and pack 'bottom' buttons.
-        # Iterating in reverse ensures the *last* item in your menu_data with "pack_side": "bottom"
-        # will appear at the very bottom of the sidebar.
-        for item_data in reversed(bottom_buttons_data):
-            self._create_and_pack_button(item_data, tk.BOTTOM)
-
-    def _create_and_pack_button(self, item_data, side):
-        """
-        Helper method to create a button, handle its command(s), and pack it.
-        This centralizes button creation logic.
-        """
-        button_text = item_data.get("text")
-        icon_path = item_data.get("icon")
-        commands = item_data.get("commands", []) # List of dropdown commands for submenus
-        single_command = item_data.get("single_command") # Single command for a direct action button
-
-        button_options = {
-            "text": button_text,
-            "bg": self.bg,
-            "fg": "White",
-            "highlightthickness": 0,
-            "activebackground": "#343D9D",
-            "activeforeground": "White",
-            "borderwidth": 0,
-            "relief": "flat",
-            "cursor": "hand2",
-            "compound": "left",
-            "anchor": "w",
-            "font": ("Poppins SemiBold", 11),
-            "height": self.button_height,
-        }
-
-        photo_image = None
-        if icon_path:
-            photo_image = self._load_icon(icon_path)
-            if photo_image:
-                button_options["image"] = photo_image
-                button_options["padx"] = 10 # Adjust padding to give space from the left edge
-                self._button_icons.append(photo_image) # Keep reference to prevent garbage collection
-
-        # Create the main button, parented to 'self' (the Sidebar Frame)
-        button = Button(self._inner_content_frame, **button_options)
-
-        if commands: # If 'commands' list is provided and not empty, create a submenu
-            dropdown_menu = Menu(
-                self,
-                tearoff=0, 
-                bg="white",
-                fg="black",
-                font=("Poppins", 10, "normal")
-            )
-
-            for cmd_data in commands:
-                if cmd_data.get("type") == "separator":
-                    dropdown_menu.add_separator() # Adds a horizontal separator line to the menu
-                else:
-                    label = cmd_data.get("label")
-                    command = cmd_data.get("command")
-                    if label and command:
-                        dropdown_menu.add_command(label=f"  {label}  ", command=command)
-
-            button.config(command=lambda m=dropdown_menu, b=button: self._toggle_submenu(m, b))
-
-        elif single_command: # If 'single_command' is provided, assign it directly as the button's action
-            button.config(command=single_command)
-        else:
-            pass
-
-        button.pack(
-            fill="x",  # Make the button expand horizontally to fill the sidebar width
-            ipadx=10,    # No horizontal padding, as button width is set by frame_width
-            ipady=8,
-            pady=self.button_spacing, # Vertical spacing between buttons
-            side=side, # Pack from tk.TOP (default) or tk.BOTTOM as determined by menu_data
-            anchor="n" if side == tk.TOP else "s" # Anchor content to north for top-packed, south for bottom-packed,
-        )
-
-class MainFrame(Frame):
-    def __init__(self, master, **options):
-        super().__init__(master, **options)
-
-        self.grid_propagate(False)
-
-        for i in range(5):
-            self.grid_rowconfigure(i, weight=1, uniform="row_group")
-
-        for i in range(5):
-            self.grid_columnconfigure(i, weight=1, uniform="col_group")
-
-        # First Row
-        self.financial_year_card = DynamicCard(self, "Financial Year", "")
-        self.financial_year_card.grid(row=0, column=0, padx=5, pady=5, sticky="nsew")
-
-        self.total_sales_card = DynamicCard(self, "Total Sales Revenue", 0)
-        self.total_sales_card.grid(row=0, column=1, padx=5, pady=5, sticky="nsew")
-
-        self.total_cogs_card = DynamicCard(self, "Total COGS Amount", 0)
-        self.total_cogs_card.grid(row=0, column=2, padx=5, pady=5, sticky="nsew")
-
-        self.total_purchase_card = DynamicCard(self, "Total Purchases", 0)
-        self.total_purchase_card.grid(row=0, column=3, padx=5, pady=5, sticky="nsew")
-
-        self.total_expanse_card = DynamicCard(self, "Total Expenditure", 0)
-        self.total_expanse_card.grid(row=0, column=4, padx=5, pady=5, sticky="nsew")
-
-        # Secound Row
-        self.collected_revenue_card = DynamicCard(self, "Collected Revenue", 0)
-        self.collected_revenue_card.grid(row=1, column=0, padx=5, pady=5, sticky="nsew")
-
-        self.amount_receivable_card = DynamicCard(self, "Amount Receivable", 0)
-        self.amount_receivable_card.grid(row=1, column=1, padx=5, pady=5, sticky="nsew")
-
-        self.settled_purchase_card = DynamicCard(self, "Settled Purchase", 0)
-        self.settled_purchase_card.grid(row=1, column=2, padx=5, pady=5, sticky="nsew")
-
-        self.amount_payable_card = DynamicCard(self, "Amount Payable", 0)
-        self.amount_payable_card.grid(row=1, column=3, padx=5, pady=5, sticky="nsew")
-
-        self.net_profit_Loss_card = DynamicCard(self, "Net Profit/Loss", 0)
-        self.net_profit_Loss_card.grid(row=1, column=4, padx=5, pady=5, sticky="nsew")
-
-        # Charts
-        self.line_chart = LineChartFrame(self)
-        self.line_chart.grid(row=2, column=0, rowspan=3, columnspan=3, padx=5, pady=20, sticky="nsew")
-
-        self.pie_chart = PieChartFrame(self)
-        self.pie_chart.grid(row=2, column=3, rowspan=3, columnspan=2, padx=5, pady=20, sticky="nsew")
-
-        self.Card_data()
-
-    def Card_data(self):
-        start_date, end_date, financial_year = get_financial_year_dates()
-
-        metrics = ReportRepository.get_financial_dashboard_metrics(start_date, end_date)
-        
-        self.financial_year_card._update_value(financial_year)
-        self.total_sales_card._update_value(metrics["total_sales"])
-        self.total_purchase_card._update_value(metrics["total_purchase"])
-        self.total_expanse_card._update_value(metrics["total_operating_expenses"])
-        self.total_cogs_card._update_value(metrics["total_cogs"])
-        self.collected_revenue_card._update_value(metrics["collected_revenue"])
-        self.settled_purchase_card._update_value(metrics["settled_purchases"])
-        self.amount_receivable_card._update_value(metrics["accounts_receivable"])
-        self.amount_payable_card._update_value(metrics["accounts_payable"])
-        self.net_profit_Loss_card._update_value(metrics["net_profit_loss"])
-    
-    def reload_Charts(self):
-        self.line_chart._update_chart()
-        self.pie_chart._update_chart()
-
-class DynamicCard(Frame):
-    def __init__(self, parent, card_heading, initial_value=None, *args, **kwargs):
-        super().__init__(parent, relief="solid", borderwidth=0, bg="White",
-                         highlightbackground="#e0e0e0", highlightthickness=1,
-                         width=220, height=150, *args, **kwargs)
-
-        self.grid_propagate(False)
-        self.rowconfigure(0, weight=1)
-        self.rowconfigure(1, weight=2)
-        self.columnconfigure(0, weight=2)
-        self.columnconfigure(1, weight=0)
-
-        self.heading_label = tk.Label(self, text=f"{card_heading}", fg="#737791", bg="#ffffff", font=("Poppins SemiBold", 15 * -1))
-        self.heading_label.grid(row=0, column=0, sticky="sw", padx=(15, 0), pady=(10, 0))
-
-        self.value_label = tk.Label(self, text=f"{initial_value}", fg="#151D48", bg="#ffffff", font=("Poppins SemiBold", 18 * -1))
-        self.value_label.grid(row=1, column=0, sticky="nw", padx=(15, 0), pady=(0, 10))
-
-        self.bar_frame = Frame(self, relief="solid", borderwidth=0, bg="#4F59C1", width=4)
-        self.bar_frame.grid(row=0, column=1, rowspan=2, sticky="nse", padx=(5, 10), pady=10)
-
-        self._update_value(initial_value)
-
-    def _format_value(self, value):
-        try:
-            numeric_value = float(value)
-            if numeric_value == int(numeric_value):
-                return f"{int(numeric_value):,}"
-            else:
-                return f"{numeric_value:,.1f}"
-        except ValueError:
-            return str(value)
-
-    def _apply_value_color(self, value):
-        try:
-            numeric_value = float(value)
-            if numeric_value < 0:
-                self.value_label.config(fg="#DC2626")
-            else:
-                self.value_label.config(fg="#00892A")
-        except ValueError:
-            self.value_label.config(fg="#151D48")
-
-
-    def _update_value(self, new_value):
-        formatted_value = self._format_value(new_value)
-        self.value_label.config(text=formatted_value)
-        self._apply_value_color(new_value)
-
-class LineChartFrame(Frame):
-    def __init__(self, parent, *args, **kwargs):
-        super().__init__(parent, relief="solid", borderwidth=0, bg="White",
-                         highlightbackground="#ffffff", highlightthickness=0,
-                         *args, **kwargs)
-        
-        # --- FIX 1: Prevent this frame from propagating its size based on children ---
-        self.grid_propagate(False) 
-
-        # Configure internal grid to ensure canvas expands within this frame
-        self.grid_rowconfigure(0, weight=1)
-        self.grid_columnconfigure(0, weight=1)
-
-        self.dates, self.revenue, self.expenses = self._generate_data()
-
-        # Initialize persistent Matplotlib Figure and Axis once
-        self.fig = Figure()
-        self.ax = self.fig.add_subplot(111)
-        self.chart_canvas = FigureCanvasTkAgg(self.fig, master=self)
-        self.chart_canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
-
-        self._render_plot()
-
-    def _render_plot(self):
-        self.ax.clear()
-
-        # Plot the revenue and expenses lines
-        self.ax.plot(self.dates, self.revenue, marker='o', linestyle='-', color='#007acc', label='Revenue')
-        self.ax.plot(self.dates, self.expenses, marker='s', linestyle='--', color='#ff4500', label='Expenses')
-
-        # --- Customize the plot appearance ---
-        self.ax.set_ylabel('Amount (in Rs.)', fontsize=10)
-        self.ax.set_xlabel('Last 7 Days', fontsize=10)
-        self.ax.set_ylim(bottom=0)
-        self.ax.grid(True, which='both', linestyle='--', linewidth=0.5)
-        self.ax.legend(fontsize=10)
-        self.fig.tight_layout(pad=2.0)
-        self.chart_canvas.draw_idle()
-
-    def _update_chart(self):
-        # Re-fetch the latest data and update existing figure
-        self.dates, self.revenue, self.expenses = self._generate_data()
-        self._render_plot()
-        
-    def _create_chart(self):
-        self._render_plot()
-
-
-    def _generate_data(self):
-        start_date = (datetime.now() - timedelta(days=6)).strftime('%d/%m/%Y')
-        end_date = (datetime.now() - timedelta(days=0)).strftime('%d/%m/%Y')
-
-        dates = get_dates_between(start_date, end_date)
-
-        placeholders = ', '.join(['?'] * len(dates))
-        case_statement = " ".join(
-            [f"WHEN '{date}' THEN {index}" for index, date in enumerate(dates, start=1)]
-        )
-
-        last_7_days = [(datetime.now() - timedelta(days=i)).strftime('%d') for i in range(6, 1, -1)]
-        last_7_days.extend(["Yesterday", "Today"])
-
-        revenue_q = f"""
-        SELECT date, COALESCE(CAST(SUM(total_amount) AS INTEGER), 0) AS total_expense FROM Payments
-        WHERE (entity_type = 'Income' OR Expanse_type = 'Adjustment Credit') AND date IN ({placeholders}) 
-        GROUP BY 
-            date
-        ORDER BY CASE date {case_statement} ELSE 999 END;
-        """
-
-        expenses_q = f"""
-        SELECT date, COALESCE(CAST(SUM(total_amount) AS INTEGER), 0) AS total_expense FROM Payments
-        WHERE (entity_type IN ('Expense', 'Salaries') OR Expanse_type = 'Adjustment Debit') AND date IN ({placeholders})
-        GROUP BY 
-            date
-        ORDER BY 
-            CASE 
-                date
-                {case_statement}
-                ELSE 999
-            END;
-        """
-
-        data1 = dict(query_all(revenue_q, dates))
-        data2 = dict(query_all(expenses_q, dates))
-
-        revenue = [data1.get(day, 0) for day in dates]
-        expenses = [data2.get(day, 0) for day in dates]
-
-        return last_7_days, revenue, expenses
-
-class PieChartFrame(Frame):
-    def __init__(self, parent, *args, **kwargs):
-        super().__init__(parent, relief="solid", borderwidth=0, bg="White",
-                         highlightbackground="#ffffff", highlightthickness=0,
-                         *args, **kwargs)
-        
-        self.grid_propagate(False)
-        self.grid_rowconfigure(0, weight=1)
-        self.grid_columnconfigure(0, weight=1)
-
-        self.labels, self.value = self._generate_data()
-
-        # Initialize persistent Matplotlib Figure and Axis once
-        self.figure = Figure(facecolor="#ffffff")
-        self.axis = self.figure.add_subplot(111)
-        self.canvas = FigureCanvasTkAgg(self.figure, master=self)
-        self.canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
-
-        self._render_pie()
-        self.bind("<Configure>", self._on_frame_resize)
-
-    def _render_pie(self):
-        self.axis.clear()
-
-        # Check if there is data to plot
-        if not self.value or sum(self.value) == 0:
-            self.axis.text(0.5, 0.5, 'No Expenses', 
-                    horizontalalignment='center', 
-                    verticalalignment='center', 
-                    fontsize=16, 
-                    color='gray',
-                    transform=self.axis.transAxes)
-            self.axis.set_xticks([])
-            self.axis.set_yticks([])
-            for spine in self.axis.spines.values():
-                spine.set_visible(False)
-        else:
-            wedges, texts, autotexts = self.axis.pie(
-                self.value, 
-                autopct='%1.1f%%',
-                startangle=90,
-                textprops=dict(color="w")
-            )
-            self.axis.legend(wedges, self.labels,
-                      title="Expense Types",
-                      loc="best",
-                      fontsize='small')
-            plt.setp(autotexts, size=10, weight="bold")
-            self.axis.axis('equal')
-
-        self.figure.tight_layout(pad=1.0)
-        self.canvas.draw_idle()
-
-    def _update_chart(self):
-        # Re-fetch the latest data and redraw on persistent figure
-        self.labels, self.value = self._generate_data()
-        self._render_pie()
-
-    def _create_Pie_chart(self):
-        self._render_pie()
-
-
-    def _on_frame_resize(self, event):
-        """
-        Callback function for the <Configure> event.
-        Resizes the Matplotlib figure to match the new size of the PieChartFrame.
-        """
-        new_width_pixels = event.width
-        new_height_pixels = event.height
-
-        # Convert pixels to inches, accounting for internal padding
-        width_inches = (new_width_pixels - 10) / self.figure.dpi
-        height_inches = (new_height_pixels - 20) / self.figure.dpi
-
-        if width_inches > 0 and height_inches > 0:
-            self.figure.set_size_inches(width_inches, height_inches, forward=True)
-            self.canvas.draw_idle()
-
-    def _generate_data(self):
-        query = """
-            SELECT Expanse_type, COALESCE(SUM(total_amount), 0.0) AS total_expense
-            FROM Payments
-            WHERE Expanse_type IN ('Rent', 'Utilities', 'Maintenance', 'Marketing', 'Loan Interest', 'Taxes', 'Other Expances') 
-            AND entity_type = 'Expense'
-            GROUP BY Expanse_type
-        """
-        data = query_all(query)
-        
-        if not data:
-            labels, values = ['No Expense'], [0]
-        else:
-            labels, values = zip(*data)  # Extract labels and values
-
-        # Remove zero-expense categories
-        labels = [label for i, label in enumerate(labels) if values[i] > 0]
-        values = [value for value in values if value > 0]
-
-        return labels, values
-
-class popupMassage:
-    def __init__(self, parent, title, message, button_texts=None):
-        self.result = None # Stores the text of the button clicked
-        self.window = tk.Toplevel(parent)
-        self.window.title(title)
-        self.iconbitmap(generate_path("UI", "assets", "BillMates.ico"))
-        self.window.transient(parent) # Make the message box appear on top of the parent
-        self.window.grab_set()       # Make the message box modal (block parent interaction)
-
-        # Center the message box over the parent window
-        self._center_window(parent)
-
-        # Handle window close protocol (e.g., 'X' button)
-        self.window.protocol("WM_DELETE_WINDOW", self._on_close)
-
-        # --- Message Label ---
-        # Using ttk.Label for better styling
-        message_label = ttk.Label(self.window, text=message, wraplength=300, justify="center",
-                                  font=('Arial', 10))
-        message_label.pack(padx=20, pady=20)
-
-        # --- Buttons Frame ---
-        buttons_frame = ttk.Frame(self.window)
-        buttons_frame.pack(pady=10)
-
-        if button_texts is None:
-            button_texts = ['OK'] # Default button
-
-        # Create buttons dynamically
-        for text in button_texts:
-            # Using ttk.Button for better styling
-            button = ttk.Button(buttons_frame, text=text,
-                                command=lambda t=text: self._button_click(t))
-            button.pack(side=tk.LEFT, padx=5)
-
-        # Wait until the window is closed before returning control to the caller
-        self.window.wait_window(self.window)
-
-    def _button_click(self, button_text):
-        self.result = button_text
-        self.window.destroy()
-
-    def _on_close(self):
-        self.result = None # Indicate that no button was clicked
-        self.window.destroy()
-
-    def get_result(self):
-        return self.result
-        
-
-def get_financial_year_dates(ref_date: date = None):
-    today = ref_date or date.today()
-    if today.month >= 4:
-        start_yr, end_yr = today.year, today.year + 1
-    else:
-        start_yr, end_yr = today.year - 1, today.year
-    return (
-        date(start_yr, 4, 1).strftime("%d/%m/%Y"),
-        date(end_yr, 3, 31).strftime("%d/%m/%Y"),
-        f"{start_yr}-{end_yr}",
-    )
-
-
-def export_year_report(report_type):
+from datetime import datetime, timedelta
+from tkinter import ttk
+from typing import Any, Dict, List, Optional
+
+from UI.dashboard import (
+    THEME,
+    DashboardDataProvider,
+    DashboardLoader,
+    DashboardSidebar,
+    ExpenseDistributionCard,
+    GrowthPromoCard,
+    KpiSummaryCard,
+    QuickActionsCard,
+    RecentActivitiesCard,
+    RevenueExpensesChartCard,
+    TopHeaderBar,
+    WelcomeBanner,
+    format_compact_currency,
+    get_financial_year_dates,
+    get_font,
+    load_bundled_fonts,
+)
+from UI.gui import (
+    Backup_ui,
+    Manage_Cheques_ui,
+    Manage_chequeBook_ui,
+    PrintCheque_ui,
+    Reports_ui,
+    Restore_ui,
+    addChequeBook_ui,
+    company_info,
+    customer_payment_in,
+    expense_payments_out,
+    manage_clients,
+    manage_invoice_ui,
+    manage_payments,
+    new_adjustment_ui,
+    new_client_ui,
+    new_invoice_ui,
+    new_purchase_ui,
+    pay_salary_ui,
+    payment_getway,
+    supplier_payments_out,
+    terms_conditions,
+)
+from utilities.path_utils import _show_error, center_window, generate_path, read_ini
+from utilities.report_pdf_generator import export_pdf_report
+
+
+def export_year_report(report_type: str, parent: tk.Misc = None) -> None:
     try:
-        if report_type not in ["Revenue Reports", "Expense Analysis", "Cash Flow Statement", "Profit and Loss Statement"]:
-            return  
-
+        if report_type not in [
+            "Revenue Reports",
+            "Expense Analysis",
+            "Cash Flow Statement",
+            "Profit and Loss Statement",
+        ]:
+            return
         start_date, end_date, _ = get_financial_year_dates()
-    
-        export_report(report_type, start_date, end_date)
+        export_pdf_report(
+            report_type=report_type,
+            start_date=start_date,
+            end_date=end_date,
+            parent_window=parent,
+        )
+    except Exception as exc:
+        _show_error("Report Error", "An unexpected error occurred while generating the annual PDF report.", exc=exc)
 
-    except Exception as e:
-        _show_error("Report Error", "An unexpected error occurred while generating the annual report.", exc=e)
 
 def ask_backup_exit_choice(parent, title: str, message: str) -> str:
     """
@@ -697,9 +219,8 @@ def ask_backup_exit_choice(parent, title: str, message: str) -> str:
     return choice["action"]
 
 
-def on_closing(root):
-    """Stop the after function, check backup, and close the window"""
-
+def on_closing(root: tk.Misc) -> None:
+    """Check backup status and exit the application cleanly."""
     try:
         root.config(cursor="watch")
         root.update_idletasks()
@@ -711,8 +232,7 @@ def on_closing(root):
         if last_backup_str:
             try:
                 last_backup_datetime = datetime.strptime(last_backup_str, "%d/%m/%Y : %H:%M:%S")
-                today = datetime.now()
-                if (today - last_backup_datetime) > timedelta(days=30):
+                if (datetime.now() - last_backup_datetime) > timedelta(days=30):
                     reminder_title = "Backup Reminder"
                     reminder_msg = f"It has been more than 30 days since your last backup ({last_backup_str})."
             except ValueError:
@@ -728,9 +248,8 @@ def on_closing(root):
             if action == "backup":
                 Backup_ui(parent=root)
                 return
-            elif action == "cancel":
+            if action == "cancel":
                 return
-            # If action == "exit" ("Backup Later / Exit"), proceed to close below
 
         root.config(cursor="")
         root.quit()
@@ -742,131 +261,578 @@ def on_closing(root):
             pass
 
 
-class App(Tk):
-    def __init__(self):
-        super().__init__()
+class MainFrame(tk.Frame):
+    """
+    Scroll-aware responsive dashboard Overview workspace containing:
+    - Welcome Banner
+    - 5 KPI Summary Cards
+    - Revenue & Expenses Overview + Expense Distribution Charts
+    - Quick Actions, Recent Activities, and Sales Growth Card
+    Preserves `Card_data()` and `reload_Charts()` for Top_Close compatibility.
+    """
 
-        self.geometry("1280x720")
-        self.iconbitmap(generate_path("UI", "assets", "BillMates.ico"))
-        self.minsize(1280, 720)
+    def __init__(
+        self,
+        master: tk.Misc,
+        app_root: tk.Misc,
+        data_provider: DashboardDataProvider,
+        preloaded: Optional[Dict[str, Any]] = None,
+        **options,
+    ):
+        c = THEME["colors"]
+        super().__init__(master, bg=c["app_bg"], **options)
+        self.app_root = app_root
+        self.data_provider = data_provider
+        self._latest_snapshot = None
+        self._scrollbar_visible = False
+
+        self.grid_rowconfigure(0, weight=1)
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_columnconfigure(1, weight=0)
+
+        self._configure_scrollbar_style()
+
+        self._scroll_canvas = tk.Canvas(self, bg=c["app_bg"], highlightthickness=0, bd=0)
+        self._scroll_canvas.grid(row=0, column=0, sticky="nsew")
+
+        self._v_scroll = ttk.Scrollbar(
+            self,
+            orient="vertical",
+            command=self._scroll_canvas.yview,
+            style="Dashboard.Vertical.TScrollbar",
+        )
+        self._scroll_canvas.configure(yscrollcommand=self._v_scroll.set)
+
+        pad_x = THEME["spacing"]["outer_pad_x"]
+        pad_y = THEME["spacing"]["outer_pad_y"]
+
+        self._viewport = tk.Frame(self._scroll_canvas, bg=c["app_bg"])
+        self._viewport.grid_rowconfigure(0, weight=1)
+        self._viewport.grid_columnconfigure(0, weight=1)
+        self._win_id = self._scroll_canvas.create_window(0, 0, anchor="nw", window=self._viewport)
+
+        self._content_host = tk.Frame(self._viewport, bg=c["app_bg"])
+        self._content_host.grid(row=0, column=0, sticky="nsew", padx=pad_x, pady=pad_y)
+        self._content_host.grid_rowconfigure(0, weight=1)
+        self._content_host.grid_columnconfigure(0, weight=1)
+
+        self._build_overview_page()
+
+        self._scroll_canvas.bind("<Configure>", self._sync_scroll_region)
+        self._viewport.bind("<Configure>", self._sync_scroll_region)
+        self.app_root.bind_all("<MouseWheel>", self._on_mousewheel, add="+")
+
+        if preloaded:
+            self.Card_data(snapshot=preloaded.get("snapshot"))
+            self.reload_Charts(
+                series=preloaded.get("series"),
+                distribution=preloaded.get("distribution"),
+            )
+        else:
+            self.Card_data()
+            self.reload_Charts()
+        self.after_idle(self._sync_scroll_region)
+
+    def _configure_scrollbar_style(self) -> None:
+        c = THEME["colors"]
+        style = ttk.Style()
         try:
-            self.state("zoomed")
+            style.theme_use("clam")
         except tk.TclError:
-            self.attributes('-fullscreen', True)
-        Compney_name = str(read_ini("PROFILE", "name"))
-        self.title(f"Dashboard - {Compney_name} (Admin) - BillMates")
-        self.configure(bg="#E7EBFF")
+            pass
+        style.configure(
+            "Dashboard.Vertical.TScrollbar",
+            background="#CBD5E1",
+            troughcolor=c["app_bg"],
+            bordercolor=c["app_bg"],
+            arrowcolor=c["text_muted"],
+            relief="flat",
+            width=10,
+        )
+        style.map(
+            "Dashboard.Vertical.TScrollbar",
+            background=[("active", "#94A3B8")],
+        )
 
-        menu_data = [
-        {
-            "text": "Invoice",
-            "icon": self.relative_to_assets("invoice.png"),
-            "commands": [
-                {"label": "Add Invoice (F1)", "command": lambda: new_invoice_ui(parent=self)},
-                {"label": "Add Purchase (F2)", "command": lambda: new_purchase_ui(parent=self)},
-                {"label": "Manage Invoices (F8)", "command": lambda: manage_invoice_ui(parent=self)}
-            ]
-        },
-        {
-            "text": "Clients",
-            "icon": self.relative_to_assets("user.png"),
-            "commands": [
-                {"label": "Add Clients (F3)", "command": lambda: new_client_ui(parent=self)},
-                {"label": "Manage Clients (F9)", "command": lambda: manage_clients(parent=self)}
-            ]
-        },
-        {
-            "text": "Payments",
-            "icon": self.relative_to_assets("payment.png"),
-            "commands": [
-                {"label": "Add Invoice Payments (F4)", "command": lambda: customer_payment_in(parent=self)},
-                {"label": "Add Adjustment", "command": lambda: new_adjustment_ui(parent=self)},
-                {"label": "Payment Gateway", "command": lambda: payment_getway(parent=self)},
-                {"label": "Manage Payments (F7)", "command": lambda: manage_payments(parent=self)}
-            ]
-        },
-        {
-            "text": "Expense",
-            "icon": self.relative_to_assets("expanse.png"),
-            "commands": [
-                {"label": "Add Purchase Payments (F5)", "command": lambda: supplier_payments_out(parent=self)},
-                {"label": "Add Expense Payments (F6)", "command": lambda: expense_payments_out(parent=self)},
-                {"label": "Add Salary Payments", "command": lambda: pay_salary_ui(parent=self)},
-                {"label": "Manage Payments (F7)", "command": lambda: manage_payments(parent=self)}
-            ]
-        },
-        {
-            "text": "Reports",
-            "icon": self.relative_to_assets("report.png"),
-            "commands": [
-                {"label": "Manage Reports (F10)", "command": lambda: Reports_ui(parent=self)},
-                {"type": "separator"},
-                {"label": "Revenue Reports", "command": lambda: export_year_report("Revenue Reports")},
-                {"label": "Expense Analysis", "command": lambda: export_year_report("Expense Analysis")},
-                {"label": "Cash Flow Statement", "command": lambda: export_year_report("Cash Flow Statement")},
-                {"label": "Profit and Loss Statement", "command": lambda: export_year_report("Profit and Loss Statement")}
-            ]
-        },
-        {
-            "text": "Cheques",
-            "icon": self.relative_to_assets("cheque.png"),
-            "commands": [
-                {"label": "Add/Print Cheque (F11)", "command": lambda: PrintCheque_ui(parent=self)},
-                {"label": "Manage Cheques", "command": lambda: Manage_Cheques_ui(parent=self)},
-                {"type": "separator"},
-                {"label": "Add Cheque Book", "command": lambda: addChequeBook_ui(parent=self)},
-                {"label": "Manage ChequeBooks", "command": lambda: Manage_chequeBook_ui(parent=self)}
-            ]
-        },
-        {
-            "text": "Settings",
-            "icon": self.relative_to_assets("settings.png"),
-            "commands": [
-                {"label": "Edit Company", "command": lambda: company_info('edit', parent = self)},
-                {"label": "Backup Management", "command": lambda: Backup_ui(parent=self)},
-                {"label": "Add Terms & Conditions", "command": lambda: terms_conditions(parent=self)},
-                {"label": "Restore Management", "command": lambda: Restore_ui()}
-            ]
-        },
-        {
-            "text": "Logout",
-            "icon": self.relative_to_assets("logout.png"),
-            "pack_side": "bottom", # This button will be packed from the very bottom of the sidebar
-            "single_command": lambda: on_closing(self), # Direct command for logout
-        }
+    def _sync_scroll_region(self, _event=None) -> None:
+        cw = self._scroll_canvas.winfo_width()
+        ch = self._scroll_canvas.winfo_height()
+        if cw < 50 or ch < 50:
+            return
+
+        req_h = self._viewport.winfo_reqheight()
+        needs_scroll = req_h > ch + 2
+        target_h = req_h if needs_scroll else ch
+
+        self._scroll_canvas.itemconfigure(self._win_id, width=cw, height=target_h)
+        self._scroll_canvas.configure(scrollregion=(0, 0, cw, target_h))
+
+        if needs_scroll and not self._scrollbar_visible:
+            self._v_scroll.grid(row=0, column=1, sticky="ns")
+            self._scrollbar_visible = True
+        elif not needs_scroll and self._scrollbar_visible:
+            self._v_scroll.grid_remove()
+            self._scroll_canvas.yview_moveto(0)
+            self._scrollbar_visible = False
+
+    def _on_mousewheel(self, event: tk.Event) -> None:
+        if not self._scrollbar_visible:
+            return
+        try:
+            if event.widget.winfo_toplevel() != self.app_root:
+                return
+        except Exception:
+            return
+        delta = -1 * (event.delta // 120) if event.delta else 0
+        if delta != 0:
+            self._scroll_canvas.yview_scroll(delta, "units")
+
+    def _build_overview_page(self) -> None:
+        c = THEME["colors"]
+        gap = THEME["spacing"]["card_gap"]
+
+        self.overview_page = tk.Frame(self._content_host, bg=c["app_bg"])
+        self.overview_page.grid(row=0, column=0, sticky="nsew")
+
+        self.overview_page.grid_rowconfigure(0, weight=0)
+        self.overview_page.grid_rowconfigure(1, weight=0)
+        self.overview_page.grid_rowconfigure(2, weight=1, minsize=310)
+        self.overview_page.grid_rowconfigure(3, weight=0)
+        self.overview_page.grid_columnconfigure(0, weight=1)
+
+        # Row 0: Welcome Banner
+        self.welcome_banner = WelcomeBanner(
+            self.overview_page,
+            company_name=self.data_provider.get_company_name(),
+            fy_label=get_financial_year_dates()[2],
+            height=118,
+        )
+        self.welcome_banner.grid(row=0, column=0, sticky="ew", pady=(0, gap))
+
+        # Row 1: 5 Equal KPI Summary Cards
+        kpi_row = tk.Frame(self.overview_page, bg=c["app_bg"])
+        kpi_row.grid(row=1, column=0, sticky="ew", pady=(0, gap))
+        for i in range(5):
+            kpi_row.grid_columnconfigure(i, weight=1, uniform="kpi_col")
+        kpi_row.grid_rowconfigure(0, weight=1)
+
+        self.financial_year_card = KpiSummaryCard(
+            kpi_row,
+            title="Financial Year",
+            value=get_financial_year_dates()[2],
+            icon_name="trend_up",
+            icon_fg=c["purple_icon"],
+            icon_bg=c["purple_bg"],
+            value_color=c["text_primary"],
+            wave_color="#E3E1FD",
+            show_calendar=True,
+        )
+        self.financial_year_card.grid(row=0, column=0, sticky="nsew", padx=(0, gap // 2))
+
+        self.total_sales_card = KpiSummaryCard(
+            kpi_row,
+            title="Total Sales Revenue",
+            value="0",
+            icon_name="reports",
+            icon_fg=c["success_bright"],
+            icon_bg=c["success_bg"],
+            value_color=c["success"],
+            wave_color="#DCFCE7",
+        )
+        self.total_sales_card.grid(row=0, column=1, sticky="nsew", padx=gap // 2)
+
+        self.total_cogs_card = KpiSummaryCard(
+            kpi_row,
+            title="Total COGS Amount",
+            value="0",
+            icon_name="wallet",
+            icon_fg=c["danger"],
+            icon_bg=c["danger_bg"],
+            value_color=c["danger"],
+            wave_color="#FEE2E2",
+        )
+        self.total_cogs_card.grid(row=0, column=2, sticky="nsew", padx=gap // 2)
+
+        self.total_purchase_card = KpiSummaryCard(
+            kpi_row,
+            title="Total Purchases",
+            value="0",
+            icon_name="cart",
+            icon_fg=c["info"],
+            icon_bg=c["info_bg"],
+            value_color=c["info"],
+            wave_color="#DBEAFE",
+        )
+        self.total_purchase_card.grid(row=0, column=3, sticky="nsew", padx=gap // 2)
+
+        self.total_expense_card = KpiSummaryCard(
+            kpi_row,
+            title="Total Expenditure",
+            value="0",
+            icon_name="expense",
+            icon_fg=c["warning"],
+            icon_bg=c["warning_bg"],
+            value_color=c["warning"],
+            wave_color="#FFEDD5",
+        )
+        self.total_expense_card.grid(row=0, column=4, sticky="nsew", padx=(gap // 2, 0))
+
+        # Row 2: Charts Row (62% Left Line/Area Chart, 38% Right Donut Chart)
+        charts_row = tk.Frame(self.overview_page, bg=c["app_bg"])
+        charts_row.grid(row=2, column=0, sticky="nsew", pady=(0, gap))
+        charts_row.grid_rowconfigure(0, weight=1)
+        charts_row.grid_columnconfigure(0, weight=62, uniform="chart_col")
+        charts_row.grid_columnconfigure(1, weight=38, uniform="chart_col")
+
+        self.line_chart = RevenueExpensesChartCard(
+            charts_row,
+            fetch_series=self.data_provider.get_revenue_expense_series,
+            on_open_reports=lambda: Reports_ui(parent=self.app_root),
+        )
+        self.line_chart.grid(row=0, column=0, sticky="nsew", padx=(0, gap // 2))
+
+        self.pie_chart = ExpenseDistributionCard(
+            charts_row,
+            fetch_distribution=self.data_provider.get_expense_distribution,
+        )
+        self.pie_chart.grid(row=0, column=1, sticky="nsew", padx=(gap // 2, 0))
+
+        # Row 3: Bottom 3 Cards (Quick Actions | Recent Activities | Sales Growth Card)
+        bottom_row = tk.Frame(self.overview_page, bg=c["app_bg"])
+        bottom_row.grid(row=3, column=0, sticky="ew")
+        bottom_row.grid_rowconfigure(0, weight=1)
+        bottom_row.grid_columnconfigure(0, weight=33, uniform="bot_col")
+        bottom_row.grid_columnconfigure(1, weight=35, uniform="bot_col")
+        bottom_row.grid_columnconfigure(2, weight=32, uniform="bot_col")
+
+        self.quick_actions_card = QuickActionsCard(
+            bottom_row,
+            actions=[
+                ("Create\nInvoice", "invoice", lambda: new_invoice_ui(parent=self.app_root)),
+                ("Add Client", "users", lambda: new_client_ui(parent=self.app_root)),
+                ("Record\nPayment", "payments", lambda: customer_payment_in(parent=self.app_root)),
+                ("View Reports", "reports", lambda: Reports_ui(parent=self.app_root)),
+            ],
+        )
+        self.quick_actions_card.grid(row=0, column=0, sticky="nsew", padx=(0, gap // 2))
+
+        self.recent_activities_card = RecentActivitiesCard(
+            bottom_row,
+        )
+        self.recent_activities_card.grid(row=0, column=1, sticky="nsew", padx=gap // 2)
+
+        self.growth_card = GrowthPromoCard(bottom_row)
+        self.growth_card.grid(row=0, column=2, sticky="nsew", padx=(gap // 2, 0))
+
+    def refresh_all(self) -> None:
+        self.Card_data()
+        self.reload_Charts()
+
+    def Card_data(self, snapshot=None) -> None:
+        """Refresh all KPI cards, welcome banner, recent activities, and growth card."""
+        snap = snapshot or self.data_provider.get_snapshot()
+        self._latest_snapshot = snap
+        c = THEME["colors"]
+        m = snap.metrics
+
+        self.welcome_banner.set_context(snap.company_name, snap.financial_year)
+        if hasattr(self.app_root, "header"):
+            self.app_root.header.set_company_name(snap.company_name)
+
+        self.financial_year_card.update_metric(snap.financial_year)
+
+        sales_val = m.get("total_sales", 0.0)
+        self.total_sales_card.update_metric(
+            format_compact_currency(sales_val),
+            value_color=c["success"] if sales_val >= 0 else c["danger"],
+            trend_pct=snap.sales_trend_pct,
+        )
+
+        cogs_val = m.get("total_cogs", 0.0)
+        self.total_cogs_card.update_metric(
+            format_compact_currency(cogs_val),
+            value_color=c["danger"] if cogs_val != 0 else c["text_primary"],
+            trend_pct=snap.cogs_trend_pct,
+        )
+
+        pur_val = m.get("total_purchase", 0.0)
+        self.total_purchase_card.update_metric(
+            format_compact_currency(pur_val),
+            value_color=c["info"] if pur_val != 0 else c["text_primary"],
+            trend_pct=snap.purchase_trend_pct,
+        )
+
+        exp_val = m.get("total_operating_expenses", 0.0)
+        self.total_expense_card.update_metric(
+            format_compact_currency(exp_val),
+            value_color=c["warning"] if exp_val != 0 else c["text_primary"],
+            trend_pct=snap.expense_trend_pct,
+        )
+
+        self.recent_activities_card.set_activities(snap.recent_activities)
+        self.growth_card.update_sales_growth(snap.sales_trend_pct)
+
+    def reload_Charts(self, series=None, distribution=None) -> None:
+        """Re-query and re-render both matplotlib charts."""
+        self.line_chart.refresh(preloaded=series)
+        self.pie_chart.refresh(preloaded=distribution)
+
+
+class App(tk.Tk):
+    """Main desktop application window with animated startup loader."""
+
+    def __init__(self, start_mainloop: bool = True, show_loader: bool = True):
+        super().__init__()
+        self.withdraw()
+        load_bundled_fonts()
+
+        c = THEME["colors"]
+        self.geometry("1380x840")
+        self.minsize(1160, 680)
+        try:
+            self.iconbitmap(generate_path("UI", "assets", "BillMates.ico"))
+        except Exception:
+            pass
+
+        self.data_provider = DashboardDataProvider()
+        company_name = self.data_provider.get_company_name()
+        self.title(f"Dashboard - {company_name} (Admin) - BillMates")
+        self.configure(bg=c["app_bg"])
+
+        loader: Optional[DashboardLoader] = None
+        if show_loader:
+            loader = DashboardLoader(self)
+            loader.set_progress(18, animate_ms=70)
+
+        preloaded: Dict[str, Any] = {}
+        fetch_errors: List[Exception] = []
+
+        def _fetch_worker() -> None:
+            try:
+                preloaded["snapshot"] = self.data_provider.get_snapshot()
+                preloaded["series"] = self.data_provider.get_revenue_expense_series(7)
+                preloaded["distribution"] = self.data_provider.get_expense_distribution("This Month")
+            except Exception as exc:
+                fetch_errors.append(exc)
+
+        try:
+            if loader is not None:
+                worker = threading.Thread(target=_fetch_worker, daemon=True)
+                worker.start()
+                deadline = time.monotonic() + 12.0
+                while worker.is_alive():
+                    if time.monotonic() > deadline:
+                        raise TimeoutError("Timed out while loading database records.")
+                    loader._progress = min(58.0, loader._progress + 1.5)
+                    loader.tick()
+                    time.sleep(0.02)
+                worker.join()
+                if fetch_errors:
+                    raise fetch_errors[0]
+                loader.set_progress(66, animate_ms=65)
+            else:
+                _fetch_worker()
+                if fetch_errors:
+                    raise fetch_errors[0]
+
+
+            menu_data = self._build_menu_data()
+
+            self.grid_rowconfigure(0, weight=1)
+            self.grid_columnconfigure(0, weight=0)
+            self.grid_columnconfigure(1, weight=1)
+
+            self.sidebar = DashboardSidebar(
+                self,
+                menu_data=menu_data,
+                on_dashboard=lambda: self.mainframe.refresh_all(),
+            )
+            self.sidebar.grid(row=0, column=0, sticky="ns")
+
+            right_col = tk.Frame(self, bg=c["app_bg"])
+            right_col.grid(row=0, column=1, sticky="nsew")
+            right_col.grid_rowconfigure(0, weight=0)
+            right_col.grid_rowconfigure(1, weight=1)
+            right_col.grid_columnconfigure(0, weight=1)
+
+            self.header = TopHeaderBar(
+                right_col,
+                company_name=company_name,
+                on_search=self._handle_search,
+                on_search_select=self._handle_search_select,
+                on_edit_company=lambda: company_info("edit", parent=self),
+                on_backup=lambda: Backup_ui(parent=self),
+                on_refresh=lambda: self.mainframe.refresh_all(),
+                get_notifications=self._get_notifications,
+            )
+            self.header.grid(row=0, column=0, sticky="ew")
+
+            if loader is not None:
+                loader.set_progress(86, animate_ms=65)
+
+            self.mainframe = MainFrame(
+                right_col,
+                app_root=self,
+                data_provider=self.data_provider,
+                preloaded=preloaded,
+            )
+            self.mainframe.grid(row=1, column=0, sticky="nsew")
+
+            self._bind_shortcuts()
+            self.resizable(True, True)
+            self.update_idletasks()
+            self.mainframe._sync_scroll_region()
+
+            if loader is not None:
+                loader.set_progress(100, animate_ms=55)
+        except Exception as exc:
+            if loader is not None:
+                loader.close()
+                loader = None
+            _show_error(
+                "Startup Error",
+                "Failed to load the dashboard. Please check the logs or database.",
+                parent=self,
+                exc=exc,
+            )
+            try:
+                self.destroy()
+            except Exception:
+                pass
+            raise
+        finally:
+            if loader is not None:
+                loader.close()
+
+        self.deiconify()
+        if start_mainloop:
+            self.attributes("-fullscreen", True)
+        self.lift()
+        self.update()
+
+        if start_mainloop:
+            self.mainloop()
+
+    def _build_menu_data(self) -> List[Dict[str, Any]]:
+        return [
+            {
+                "text": "Invoice",
+                "commands": [
+                    {"label": "Add Invoice (F1)", "command": lambda: new_invoice_ui(parent=self)},
+                    {"label": "Add Purchase (F2)", "command": lambda: new_purchase_ui(parent=self)},
+                    {"label": "Manage Invoices (F8)", "command": lambda: manage_invoice_ui(parent=self)},
+                ],
+            },
+            {
+                "text": "Clients",
+                "commands": [
+                    {"label": "Add Clients (F3)", "command": lambda: new_client_ui(parent=self)},
+                    {"label": "Manage Clients (F9)", "command": lambda: manage_clients(parent=self)},
+                ],
+            },
+            {
+                "text": "Payments",
+                "commands": [
+                    {"label": "Add Invoice Payments (F4)", "command": lambda: customer_payment_in(parent=self)},
+                    {"label": "Add Adjustment", "command": lambda: new_adjustment_ui(parent=self)},
+                    {"label": "Payment Gateway", "command": lambda: payment_getway(parent=self)},
+                    {"label": "Manage Payments (F7)", "command": lambda: manage_payments(parent=self)},
+                ],
+            },
+            {
+                "text": "Expense",
+                "commands": [
+                    {"label": "Add Purchase Payments (F5)", "command": lambda: supplier_payments_out(parent=self)},
+                    {"label": "Add Expense Payments (F6)", "command": lambda: expense_payments_out(parent=self)},
+                    {"label": "Add Salary Payments", "command": lambda: pay_salary_ui(parent=self)},
+                    {"label": "Manage Payments (F7)", "command": lambda: manage_payments(parent=self)},
+                ],
+            },
+            {
+                "text": "Reports",
+                "commands": [
+                    {"label": "Manage Reports (F10)", "command": lambda: Reports_ui(parent=self)},
+                    {"type": "separator"},
+                    {"label": "Revenue Reports (PDF)", "command": lambda: export_year_report("Revenue Reports", parent=self)},
+                    {"label": "Expense Analysis (PDF)", "command": lambda: export_year_report("Expense Analysis", parent=self)},
+                    {"label": "Cash Flow Statement (PDF)", "command": lambda: export_year_report("Cash Flow Statement", parent=self)},
+                    {"label": "Profit and Loss Statement (PDF)", "command": lambda: export_year_report("Profit and Loss Statement", parent=self)},
+                ],
+            },
+            {
+                "text": "Cheques",
+                "commands": [
+                    {"label": "Add/Print Cheque (F11)", "command": lambda: PrintCheque_ui(parent=self)},
+                    {"label": "Manage Cheques", "command": lambda: Manage_Cheques_ui(parent=self)},
+                    {"type": "separator"},
+                    {"label": "Add Cheque Book", "command": lambda: addChequeBook_ui(parent=self)},
+                    {"label": "Manage ChequeBooks", "command": lambda: Manage_chequeBook_ui(parent=self)},
+                ],
+            },
+            {
+                "text": "Settings",
+                "commands": [
+                    {"label": "Edit Company", "command": lambda: company_info("edit", parent=self)},
+                    {"label": "Add Terms & Conditions", "command": lambda: terms_conditions(parent=self)},
+                    {"label": "Backup Management", "command": lambda: Backup_ui(parent=self)},
+                    {"label": "Restore Management", "command": lambda: Restore_ui()},
+                ],
+            },
+            {
+                "text": "Logout",
+                "pack_side": "bottom",
+                "single_command": lambda: on_closing(self),
+            },
         ]
 
-        self.header = HeaderFrame(self, bg="#FFFFFF")
-        self.header.pack(side="top", fill="x")
+    def _handle_search(self, query: str) -> List[Dict[str, str]]:
+        quick_commands = [
+            {"kind": "Action", "label": "Create New Invoice (F1)", "action": "new_invoice"},
+            {"kind": "Action", "label": "Add New Client (F3)", "action": "new_client"},
+            {"kind": "Action", "label": "Record Payment In (F4)", "action": "payment_in"},
+            {"kind": "Action", "label": "Manage Payments (F7)", "action": "payments"},
+            {"kind": "Action", "label": "View Financial Reports (F10)", "action": "reports"},
+        ]
+        q = query.lower()
+        matches = [cmd for cmd in quick_commands if q in cmd["label"].lower()]
+        matches.extend(self.data_provider.search_entities(query))
+        return matches[:8]
 
-        self.sidebar = Sidebar(self, frame_width=200, inner_pady=(10, 25), menu_data=menu_data)
-        self.sidebar.pack(side="left", fill="y")
+    def _handle_search_select(self, payload: Dict[str, str]) -> None:
+        act = payload.get("action")
+        if act == "new_invoice":
+            new_invoice_ui(parent=self)
+        elif act == "new_client":
+            new_client_ui(parent=self)
+        elif act == "payment_in":
+            customer_payment_in(parent=self)
+        elif act == "payments":
+            manage_payments(parent=self)
+        elif act == "reports":
+            Reports_ui(parent=self)
+        elif act == "clients":
+            manage_clients(parent=self)
+        elif act == "invoices":
+            manage_invoice_ui(parent=self)
 
-        self.mainframe = MainFrame(self, bg="#E8ECFF")
-        self.mainframe.pack(side="top", fill="both", expand=True, pady=(10, 20), padx=(10,10))
+    def _get_notifications(self) -> List[str]:
+        snap = self.mainframe._latest_snapshot or self.data_provider.get_snapshot()
+        return snap.notifications
 
-        self.bind('<F1>', lambda event: new_invoice_ui(parent = self))
-        self.bind('<F2>', lambda event: new_purchase_ui(parent = self))
-        self.bind('<F3>', lambda event: new_client_ui(parent = self))
-        self.bind('<F4>', lambda event: customer_payment_in(parent = self))
-        self.bind('<F5>', lambda event: supplier_payments_out(parent = self))
-        self.bind('<F6>', lambda event: expense_payments_out(parent = self))
-        self.bind('<F7>', lambda event: manage_payments(parent = self))
-        self.bind('<F8>', lambda event: manage_invoice_ui(parent = self))
-        self.bind('<F9>', lambda event: manage_clients(parent = self))
-        self.bind('<F10>', lambda event: Reports_ui(parent = self))
-        self.bind('<F11>', lambda event: PrintCheque_ui(parent=self))
-        
-        self.bind("<Escape>", lambda event: self.attributes("-fullscreen", False) if self.attributes("-fullscreen") else None)
+    def _bind_shortcuts(self) -> None:
+        self.bind("<F1>", lambda _e: new_invoice_ui(parent=self))
+        self.bind("<F2>", lambda _e: new_purchase_ui(parent=self))
+        self.bind("<F3>", lambda _e: new_client_ui(parent=self))
+        self.bind("<F4>", lambda _e: customer_payment_in(parent=self))
+        self.bind("<F5>", lambda _e: supplier_payments_out(parent=self))
+        self.bind("<F6>", lambda _e: expense_payments_out(parent=self))
+        self.bind("<F7>", lambda _e: manage_payments(parent=self))
+        self.bind("<F8>", lambda _e: manage_invoice_ui(parent=self))
+        self.bind("<F9>", lambda _e: manage_clients(parent=self))
+        self.bind("<F10>", lambda _e: Reports_ui(parent=self))
+        self.bind("<F11>", lambda _e: PrintCheque_ui(parent=self))
+        self.bind("<Escape>", lambda event: on_closing(self))
         self.protocol("WM_DELETE_WINDOW", lambda: on_closing(self))
-
-
-        self.resizable(True, True)
-        self.mainloop()
-
-    def relative_to_assets(self, path: str) -> Path:
-        ASSETS_PATH = Path(generate_path("UI", "assets", "Dashboard"))
-        return ASSETS_PATH / Path(path)
 
 
 if __name__ == "__main__":
