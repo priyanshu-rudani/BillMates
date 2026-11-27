@@ -2,28 +2,9 @@
 utilities/report_pdf_generator.py
 ---------------------------------
 High-performance, scalable, and reusable PDF Report Generation module using ReportLab.
-Conforms strictly to the BillMates Dashboard theme:
-  - Primary Brand Accent: #4F59C1
-  - Primary Heading / Dark Text: #151D48
-  - Secondary / Muted Text: #737791
-  - Card & Soft Tint Background: #F4F6FD / #F8F9FE
-  - Border Tint: #E0E5F2
-  - Positive / Profit: #00892A
-  - Negative / Expense: #DC2626
-
-Features:
-  - Two-pass NumberedCanvas for exact "Page X of Y" page numbering and running headers/footers.
-  - Automatic page splitting and pagebreaks for tables exceeding A4 size.
-  - Repeating table headers on every page (repeatRows=1).
-  - Clean two-column header with company details and report metadata/filter badges.
-  - Summary KPI cards / totals footer with KeepTogether to prevent orphan breaks.
-  - Reusable PDFReportBuilder architecture supporting any tabular report.
-  - Built-in adapters for all BillMates reports (Sales, Purchases, Payments, Ledger,
-    Cash Flow, Profit & Loss, Revenue, Expense Analysis).
 """
 
 import os
-import sys
 from pathlib import Path
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -52,15 +33,7 @@ from reportlab.pdfgen import canvas
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
-# Project imports
-if getattr(sys, 'frozen', False):
-    root_path = Path(sys.executable).parent
-else:
-    root_path = Path(__file__).parent.parent
-if str(root_path) not in sys.path:
-    sys.path.append(str(root_path))
-
-from utilities.path_utils import generate_path, read_ini, get_client_id, get_client_type
+from utilities.path_utils import generate_path, read_ini, get_client_id, get_client_type, _show_error, logger
 from core.database import query_all
 from services.report_service import ReportRepository, ReportFilterError, validate_and_convert_dates, to_iso_sql
 
@@ -1182,9 +1155,10 @@ def export_pdf_report(
                 try:
                     os.startfile(file_path)
                 except Exception as open_err:
+                    logger.warning("PDF saved at %s but could not be launched automatically: %s", file_path, open_err)
                     messagebox.showwarning(
                         "File Open Warning",
-                        f"PDF was saved but could not be automatically launched: {open_err}",
+                        "PDF was saved successfully, but could not be launched automatically. Please open it from your file manager.",
                         parent=parent_window
                     )
 
@@ -1200,9 +1174,10 @@ def export_pdf_report(
             messagebox.showerror("Permission Error", msg, parent=parent_window)
         return None
     except Exception as e:
-        msg = f"An unexpected error occurred during PDF generation:\n{e}"
         if parent_window:
-            messagebox.showerror("Report Error", msg, parent=parent_window)
+            _show_error("Report Error", "An unexpected error occurred during PDF generation. Please try again.", parent=parent_window, exc=e)
+        else:
+            _show_error("Report Error", "An unexpected error occurred during PDF generation. Please try again.", exc=e)
         return None
 
 

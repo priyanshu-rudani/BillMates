@@ -1,15 +1,6 @@
-import sys
-from pathlib import Path
-
-if getattr(sys, 'frozen', False):  # Running as a PyInstaller EXE
-    root_path = Path(sys.executable).parent
-else:  # Running as a Python script
-    root_path = Path(__file__).parent.parent
-sys.path.append(str(root_path))
-
 import tkinter as tk
 from tkinter import ttk, messagebox
-from utilities.path_utils import *
+from utilities.path_utils import _show_error, center_window, generate_path, read_ini, write_ini
 from utilities.text import States
 import re
 
@@ -161,7 +152,7 @@ class CompanyForm(ttk.Frame):
             self.parent.destroy()
 
         except Exception as e:
-            messagebox.showerror("Error", f"We were unable to create your company at this time. We were unable to create your company at this time. \n {e}", parent=self)
+            _show_error("Company Setup Error", "We were unable to save your company profile at this time. Please try again.", parent=self, exc=e)
             return
 
     def _validate_fields(self):
@@ -194,7 +185,7 @@ class CompanyForm(ttk.Frame):
         
         pan_pattern = r"[A-Z]{5}[0-9]{4}[A-Z]{1}"
         if not re.fullmatch(pan_pattern, self.pan_no.get()) and self.pan_no.get():
-            messagebox.showerror("Error", "Just a small correction needed! A PAN should have 10 letters.", parent=self)
+            messagebox.showerror("Error", "Just a small correction needed! A PAN must be 10 characters: 5 letters, 4 digits, and 1 letter (e.g., ABCDE1234F).", parent=self)
             return False
         
         return True

@@ -1,16 +1,12 @@
 import sys
 from pathlib import Path
 
-if getattr(sys, 'frozen', False):  # Running as a PyInstaller EXE
-    root_path = Path(sys.executable).parent
-else:  # Running as a Python script
-    root_path = Path(__file__).parent.parent
-sys.path.append(str(root_path))
+from utilities.path_utils import (
+    center_window, generate_path, get_database_path
+)
 
-from tkinter import Tk
-from utilities.path_utils import *
-from tkinter import ttk
-from tkinter import Tk, Button, PhotoImage, filedialog, messagebox
+import tkinter as tk
+from tkinter import Tk, Button, PhotoImage, filedialog, messagebox, ttk
 from utilities.backup import BackupSystem
 
 
@@ -95,11 +91,11 @@ class Restore_ui(tk.Toplevel):
         return file_selected
 
     def relative_to_assets(self, path: str) -> Path:
-        ASSETS_PATH = Path(generate_path(root_path, "UI", "assets", "frame11"))
+        ASSETS_PATH = Path(generate_path("UI", "assets", "frame11"))
         return ASSETS_PATH / Path(path)
     
     def restore_Backup(self):
-        source_folder = database_path()
+        source_folder = get_database_path()
         encrypted_file_path = self.backup_path_entry.get().strip()
         if not encrypted_file_path:
             messagebox.showerror("value Error", f"Please select a backup file First", parent=self)

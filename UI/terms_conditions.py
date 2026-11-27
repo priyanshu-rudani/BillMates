@@ -1,14 +1,6 @@
-import sys
-import os
-from pathlib import Path
-
-if getattr(sys, 'frozen', False):  # Running as a PyInstaller EXE
-    root_path = Path(sys.executable).parent
-else:  # Running as a Python script
-    root_path = Path(__file__).parent.parent
-sys.path.append(str(root_path))
-
-from utilities.path_utils import *
+from utilities.path_utils import (
+    _show_error, center_window, generate_path, read_ini, write_ini
+)
 import tkinter as tk
 from tkinter import ttk, messagebox
 
@@ -181,10 +173,9 @@ class TermsPopup(tk.Toplevel):
             self.result = raw_content
             terms_conditions_lines = self._wrap_text(self.result, self.MAX_CHARS_PER_LINE, self.MAX_LINES)
 
-            # Save to INI file
-            for i, line in enumerate(terms_conditions_lines, start=1):
-                if i > self.MAX_LINES:
-                    break
+            # Save to INI file (clear any leftover lines beyond current count)
+            for i in range(1, self.MAX_LINES + 1):
+                line = terms_conditions_lines[i - 1] if i <= len(terms_conditions_lines) else ""
                 try:
                     write_ini("POLICY", f"line{i}", line)
                 except Exception as e:
@@ -194,7 +185,7 @@ class TermsPopup(tk.Toplevel):
 
         except Exception as e:
             print(f"Save error: {e}")
-            messagebox.showerror("Save Error", f"Failed to save terms: {e}", parent=self)
+            _show_error("Save Error", "Unable to save terms and conditions. Please try again.", parent=self, exc=e)
 
     def _wrap_text(self, para, max_line_length, max_lines):
         """
@@ -319,7 +310,7 @@ class TermsPopup(tk.Toplevel):
 
         except Exception as e:
             print(f"Ask terms error: {e}")
-            messagebox.showerror("Error", f"Failed to open Terms dialog: {e}", parent=parent)
+            _show_error("Error", "Unable to open Terms and Conditions dialog. Please try again.", parent=parent, exc=e)
             return None
 
 

@@ -1,13 +1,12 @@
-import sys
+import os
 from pathlib import Path
-
-if getattr(sys, 'frozen', False):  # Running as a PyInstaller EXE
-    root_path = Path(sys.executable).parent
-else:  # Running as a Python script
-    root_path = Path(__file__).parent.parent
-sys.path.append(str(root_path))
  
-from utilities.path_utils import *
+from utilities.path_utils import (
+    center_window, generate_path, SearchBox
+)
+from core.database import query_all, query_one, execute_non_query
+
+import tkinter as tk
 from tkinter import Canvas, PhotoImage, Button, messagebox
 from tkinter import BooleanVar, StringVar
 from tkinter import ttk, filedialog
@@ -20,7 +19,7 @@ from utilities import text
 
 
 def PrintOnCheque(Cheque_id = None, parent = None):
-    ASSETS_PATH = Path(generate_path(root_path, "UI", "assets", "frame4"))
+    ASSETS_PATH = Path(generate_path("UI", "assets", "frame4"))
 
     def relative_to_assets(path: str) -> Path:
         return ASSETS_PATH / Path(path)
@@ -66,8 +65,11 @@ def PrintOnCheque(Cheque_id = None, parent = None):
             else:
                 try:
                     data_Amount = float(data_Amount)
+                    if data_Amount <= 0:
+                        raise ValueError
                 except ValueError:
-                    messagebox.showwarning("Invalid Amount", "Amount must be a valid number.", parent=window)
+                    messagebox.showwarning("Invalid Amount", "Amount must be a valid positive number.", parent=window)
+                    return
         
 
         filename = f"Cheque to {data_Payee_name}.pdf" 
@@ -81,7 +83,7 @@ def PrintOnCheque(Cheque_id = None, parent = None):
         )
         if file_path:
             if data_saveCheque is True:
-                data_id = fetch_data(f"SELECT id FROM ChequeBook WHERE book_name = '{data_Cheque_book}'", db_name='Cheque.db')[0][0]
+                data_id = query_one(f"SELECT id FROM ChequeBook WHERE book_name = '{data_Cheque_book}'", db_name='Cheque.db')[0]
 
                 if Cheque_id:
                     
@@ -96,7 +98,7 @@ def PrintOnCheque(Cheque_id = None, parent = None):
                         WHERE id = {Cheque_id}
                     """
 
-                    run_query(query, db_name='Cheque.db')
+                    execute_non_query(query, db_name='Cheque.db')
 
                 else:
                     query =f"""
@@ -106,11 +108,11 @@ def PrintOnCheque(Cheque_id = None, parent = None):
                         ({data_id}, '{data_Cheque_no}', '{data_Cheque_date}', '{data_Cheque_type}', '{data_Payee_name}', {data_Amount})
                     """
 
-                    run_query(query, db_name='Cheque.db')
+                    execute_non_query(query, db_name='Cheque.db')
 
                     data_Cheque_no = int(data_Cheque_no) + 1
 
-                    run_query(f"UPDATE ChequeBook SET Current_ChequeNo = {data_Cheque_no} WHERE id = {data_id}", db_name='Cheque.db')
+                    execute_non_query(f"UPDATE ChequeBook SET Current_ChequeNo = {data_Cheque_no} WHERE id = {data_id}", db_name='Cheque.db')
                     
 
             export_Cheque(file_path, data_Payee_name, data_Amount, str(Date_formate.get()),  data_Cheque_date, data_Cheque_type, bool(isBearer.get()))
@@ -132,8 +134,8 @@ def PrintOnCheque(Cheque_id = None, parent = None):
 
         filter = f"SELECT * FROM Cheques WHERE id = {id}"
 
-        Data = fetch_data(filter, db_name='Cheque.db')[0]
-        Cheque_book_Name = fetch_data(f"SELECT book_name FROM ChequeBook WHERE id = '{Data[1]}'", db_name='Cheque.db')[0][0]
+        Data = query_all(filter, db_name='Cheque.db')[0]
+        Cheque_book_Name = query_one(f"SELECT book_name FROM ChequeBook WHERE id = '{Data[1]}'", db_name='Cheque.db')[0]
 
         Cheque_book.set(Cheque_book_Name)
         onCheckbook_Select(None)
@@ -232,7 +234,7 @@ def PrintOnCheque(Cheque_id = None, parent = None):
             Account_no.set("")
             Cheque_no.set("")
 
-            Cheque_book_data = fetch_data(f"SELECT * FROM ChequeBook WHERE book_name = '{Selected_Book}'", db_name='Cheque.db')[0]
+            Cheque_book_data = query_all(f"SELECT * FROM ChequeBook WHERE book_name = '{Selected_Book}'", db_name='Cheque.db')[0]
             
             if Cheque_book_data[6] >= (Cheque_book_data[5] + Cheque_book_data[7]):
                 response = messagebox.askyesno(
@@ -296,7 +298,7 @@ def PrintOnCheque(Cheque_id = None, parent = None):
         outline="#000000")
 
 
-    Cheque_books = [row[0] for row in fetch_data("SELECT book_name FROM ChequeBook", db_name='Cheque.db')]
+    Cheque_books = [row[0] for row in query_all("SELECT book_name FROM ChequeBook", db_name='Cheque.db')]
     entry_1 = ttk.Combobox(
         window,
         textvariable=Cheque_book,  # Holds selected value
@@ -390,7 +392,7 @@ def PrintOnCheque(Cheque_id = None, parent = None):
         width=501.0,
         height=25.0
     )
-    data = [row[0] for row in fetch_data("SELECT DISTINCT Payee_name FROM Cheques", db_name='Cheque.db')]
+    data = [row[0] for row in query_all("SELECT DISTINCT Payee_name FROM Cheques", db_name='Cheque.db')]
     listbox = tk.Listbox(
         window, 
         height=5,

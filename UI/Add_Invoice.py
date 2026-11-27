@@ -1,15 +1,8 @@
-import sys
 import os
 from pathlib import Path
 from datetime import datetime
 
-if getattr(sys, 'frozen', False):  # Running as a PyInstaller EXE
-    root_path = Path(sys.executable).parent
-else:  # Running as a Python script
-    root_path = Path(__file__).parent.parent
-sys.path.append(str(root_path))
-
-from utilities.path_utils import *
+from utilities.path_utils import _show_error, center_window, generate_path, Top_Close
 from utilities.window_registry import _open, track
 from services.invoice_service import (
     InvoiceService, InvoiceError, InvoiceForm, ItemInput, SALES_CONFIG, InvoiceConfig, calc_item,
@@ -68,10 +61,10 @@ def open_invoice_window(config: InvoiceConfig, parent=None, invoice_id=None):
             rec = service.load_invoice(invoice_id)
         except Exception as e:
             _open.pop(win_key, None)
-            messagebox.showerror("Error", f"Failed to load invoice: {e}", parent=parent)
+            _show_error("Invoice Error", "Unable to load the requested invoice. Please try again.", parent=parent, exc=e)
             return
 
-    ASSETS_PATH = Path(generate_path(root_path, "UI", "assets", "frame10"))
+    ASSETS_PATH = Path(generate_path("UI", "assets", "frame10"))
 
     def relative_to_assets(path: str) -> Path:
         return ASSETS_PATH / Path(path)
@@ -155,7 +148,7 @@ def open_invoice_window(config: InvoiceConfig, parent=None, invoice_id=None):
             show_error(err)
             return
         except Exception as e:
-            messagebox.showerror("Error", str(e), parent=window)
+            _show_error("Item Error", "An error occurred while adding the item. Please verify your inputs.", parent=window, exc=e)
             return
 
         if action == "updated":
@@ -185,7 +178,7 @@ def open_invoice_window(config: InvoiceConfig, parent=None, invoice_id=None):
             refresh_summary()
             update_payment()
         except Exception as e:
-            messagebox.showerror("Error", str(e), parent=window)
+            _show_error("Item Error", "An error occurred while deleting the item. Please try again.", parent=window, exc=e)
 
     def on_treeview_double_click(event):
         row_id = treeview.identify_row(event.y)
@@ -236,7 +229,7 @@ def open_invoice_window(config: InvoiceConfig, parent=None, invoice_id=None):
             show_error(err)
             return False
         except Exception as e:
-            messagebox.showerror("Save Error", str(e), parent=window)
+            _show_error("Save Error", "An unexpected error occurred while saving the invoice. Please try again.", parent=window, exc=e)
             return False
 
         messagebox.showinfo(result.title, result.message, parent=window)
@@ -293,7 +286,7 @@ def open_invoice_window(config: InvoiceConfig, parent=None, invoice_id=None):
             show_error(err)
             return
         except Exception as e:
-            messagebox.showinfo("Error", f"Error fetching client Data: {e}", parent=window)
+            _show_error("Party Data Error", "Unable to retrieve party data. Please try again.", parent=window, exc=e)
             return
         contect_no.delete(0, END)
         contect_no.insert(0, p.contact_display)
@@ -416,7 +409,7 @@ def open_invoice_window(config: InvoiceConfig, parent=None, invoice_id=None):
     try:
         client_names = service.client_names()
     except Exception as e:
-        messagebox.showinfo("Error", f"Error fetching client names: {e}", parent=window)
+        _show_error("Data Load Error", "Failed to retrieve party list.", parent=window, exc=e)
         client_names = []
 
     customer_name = ttk.Combobox(window, values=client_names, state="readonly", font=("VarelaRound Regular", 13 * -1))

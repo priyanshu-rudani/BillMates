@@ -1,14 +1,9 @@
-import sys
-from pathlib import Path
+from utilities.path_utils import (
+    _show_error, center_window, generate_path, Top_Close
+)
+from core.database import query_all, query_one, execute_non_query
 
-if getattr(sys, 'frozen', False):  # Running as a PyInstaller EXE
-    root_path = Path(sys.executable).parent
-else:  # Running as a Python script
-    root_path = Path(__file__).parent.parent
-sys.path.append(str(root_path))
- 
-from utilities.path_utils import generate_path, center_window, fetch_data, run_query, Top_Close
-from tkinter import ttk, Canvas, Entry, Text, Button, PhotoImage, messagebox
+from tkinter import ttk, Canvas, Entry, Button, messagebox
 import tkinter as tk
 from utilities.text import States
 import re
@@ -24,8 +19,8 @@ def new_client_ui(parent=None, client_id=None, on_saved=None):
     client_data = None
 
     if is_edit_mode:
-        rows = fetch_data(
-            "SELECT id, name, contact_no, gst, city, state, client_type, opening_balance, closing_bal FROM Clients WHERE id = ?",
+        rows = query_all(
+            "SELECT id, name, contact_no, gst, city, state, client_type, opening_balance, closing_bal, position FROM Clients WHERE id = ?",
             (client_id,)
         )
         if rows:
@@ -54,11 +49,13 @@ def new_client_ui(parent=None, client_id=None, on_saved=None):
     def save_client_to_db():
         name = name_entry.get().strip()
         contact_no = contect_no_entry.get().strip()
-        gst = gst_entry.get().strip().upper()
+        raw_gst_or_pos = gst_entry.get().strip()
         city = city_entry.get().strip()
         state = state_entry.get().strip()
         client_type = dropdown.get().strip()
         opening_balance_val = Balance.get().strip()
+        gst = raw_gst_or_pos.upper() if client_type != "Staff" else ""
+        position = raw_gst_or_pos if client_type == "Staff" else ""
 
         # Validation
         if not name:
@@ -79,17 +76,17 @@ def new_client_ui(parent=None, client_id=None, on_saved=None):
 
         # Check duplicate name for same client_type
         if is_edit_mode:
-            existing = fetch_data(
+            existing = query_one(
                 "SELECT count(name) FROM Clients WHERE name = ? AND client_type = ? AND id != ?",
                 (name, client_type, client_id)
             )
         else:
-            existing = fetch_data(
+            existing = query_one(
                 "SELECT count(name) FROM Clients WHERE name = ? AND client_type = ?",
                 (name, client_type)
             )
 
-        if existing and existing[0][0] > 0:
+        if existing and existing[0] > 0:
             messagebox.showerror("Validation Error", "This name already exists with this party type.", parent=window)
             return
 
@@ -114,21 +111,21 @@ def new_client_ui(parent=None, client_id=None, on_saved=None):
                 bal_diff = op_bal_float - old_op_bal
                 new_closing_bal = old_closing_bal + bal_diff
 
-                run_query("""
+                execute_non_query("""
                     UPDATE Clients
-                    SET name = ?, contact_no = ?, gst = ?, city = ?, state = ?, client_type = ?, opening_balance = ?, closing_bal = ?
+                    SET name = ?, contact_no = ?, gst = ?, city = ?, state = ?, client_type = ?, opening_balance = ?, closing_bal = ?, position = ?
                     WHERE id = ?
-                """, (name, contact_no, gst, city, state, client_type, op_bal_float, new_closing_bal, client_id))
+                """, (name, contact_no, gst, city, state, client_type, op_bal_float, new_closing_bal, position, client_id))
 
                 messagebox.showinfo("Success", "Party details updated successfully!", parent=window)
                 if on_saved:
                     on_saved()
                 Top_Close(window, parent)
             else:
-                run_query("""
-                    INSERT INTO Clients (name, contact_no, gst, city, state, client_type, opening_balance, closing_bal)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """, (name, contact_no, gst, city, state, client_type, op_bal_float, op_bal_float))
+                execute_non_query("""
+                    INSERT INTO Clients (name, contact_no, gst, city, state, client_type, opening_balance, closing_bal, position)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (name, contact_no, gst, city, state, client_type, op_bal_float, op_bal_float, position))
 
                 messagebox.showinfo("Success", "Party details added successfully!", parent=window)
                 if on_saved:
@@ -146,7 +143,7 @@ def new_client_ui(parent=None, client_id=None, on_saved=None):
                 update_text()
 
         except Exception as e:
-            messagebox.showerror("Database Error", f"An error occurred: {e}", parent=window)
+            _show_error("Database Error", "An error occurred while saving the party details. Please try again.", parent=window, exc=e)
 
     window = tk.Toplevel(parent)
     window.focus()
@@ -387,14 +384,16 @@ def new_client_ui(parent=None, client_id=None, on_saved=None):
         p_state = client_data[5] or "Select"
         p_type = client_data[6] or "Client"
         p_op_bal = str(client_data[7]) if client_data[7] is not None else "0"
+        p_position = client_data[9] if len(client_data) > 9 and client_data[9] else ""
 
         name_entry.insert(0, p_name)
         contect_no_entry.insert(0, p_contact)
-        gst_entry.insert(0, p_gst)
+        gst_entry.insert(0, p_position or p_gst if p_type == "Staff" else p_gst)
         city_entry.insert(0, p_city)
         if p_state in States:
             state_entry.set(p_state)
         dropdown.set(p_type)
+        on_select(None)
         Balance.delete(0, 'end')
         Balance.insert(0, p_op_bal)
 

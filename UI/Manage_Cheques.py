@@ -1,13 +1,10 @@
-import sys
 from pathlib import Path
 
-if getattr(sys, 'frozen', False):  # Running as a PyInstaller EXE
-    root_path = Path(sys.executable).parent
-else:  # Running as a Python script
-    root_path = Path(__file__).parent.parent
-sys.path.append(str(root_path))
- 
-from utilities.path_utils import *
+from utilities.path_utils import (
+    _show_error, center_window, generate_path
+)
+from core.database import query_all, query_one, execute_non_query
+
 import tkinter as tk
 import sqlite3
 import os
@@ -21,7 +18,7 @@ from UI.ChequePrint import PrintOnCheque
 
 def Manage_Cheques_ui(parent = None):
 
-    ASSETS_PATH = Path(generate_path(root_path, "UI", "assets", "frame8"))
+    ASSETS_PATH = Path(generate_path("UI", "assets", "frame8"))
     
     def relative_to_assets(path: str) -> Path:
         return ASSETS_PATH / Path(path)
@@ -49,7 +46,7 @@ def Manage_Cheques_ui(parent = None):
 
     def get_date_range():
 
-        dates = [row[0] for row in fetch_data("SELECT DISTINCT Cheque_Date FROM Cheques", db_name='Cheque.db')]
+        dates = [row[0] for row in query_all("SELECT DISTINCT Cheque_Date FROM Cheques", db_name='Cheque.db')]
 
         parsed_dates = [datetime.strptime(date, '%d/%m/%Y') for date in dates]
 
@@ -115,7 +112,7 @@ def Manage_Cheques_ui(parent = None):
         canvas.itemconfig(entry_bg_5, state='hidden')
 
         if selected_option == "Cheque Book":
-            chequeBook_Name = [name[0] for name in fetch_data("SELECT book_name FROM ChequeBook", db_name='Cheque.db')]
+            chequeBook_Name = [name[0] for name in query_all("SELECT book_name FROM ChequeBook", db_name='Cheque.db')]
             search_widget = ttk.Combobox(
                 window,
                 values=chequeBook_Name,
@@ -225,7 +222,7 @@ def Manage_Cheques_ui(parent = None):
                 pass
 
             elif f_search_at == "Cheque Book":
-                CB_id = fetch_data(f"SELECT id FROM ChequeBook WHERE book_name = '{f_search_value}'", db_name='Cheque.db')[0][0]
+                CB_id = query_one(f"SELECT id FROM ChequeBook WHERE book_name = '{f_search_value}'", db_name='Cheque.db')[0]
                 filters.append("C.cheque_book_id = ?")
                 cheque_params.append(CB_id)
 
@@ -269,7 +266,7 @@ FROM Cheques C
         query = cheque_query + where_clause
         params = cheque_params
 
-        result = fetch_data(query, params, db_name='Cheque.db')
+        result = query_all(query, params, db_name='Cheque.db')
 
         if result:
             for row in tree.get_children():
@@ -346,7 +343,7 @@ FROM Cheques C
                 messagebox.showerror("Error", "The file is currently open or locked. Please close it and try again.", parent=window)
             except Exception as e:
                 # Catch any other unexpected errors
-                messagebox.showerror("Error", f"An error occurred: {e}", parent=window)
+                _show_error("Export Error", "Failed to export cheques to Excel. Please try again.", parent=window, exc=e)
         else:
             pass
 
@@ -677,14 +674,15 @@ FROM Cheques C
             )
             if confirm:
                 try:
-                    run_query(f"DELETE FROM Cheques WHERE id = {id}", db_name='Cheque.db')
-                    messagebox.showinfo("Success", "The Invoice is successfully Deleted!", parent=window)
+                    execute_non_query(f"DELETE FROM Cheques WHERE id = {id}", db_name='Cheque.db')
+                    messagebox.showinfo("Success", "The Cheque is successfully Deleted!", parent=window)
 
                 except sqlite3.Error as e:
-                    messagebox.showerror(
+                    _show_error(
                         "Database Error",
-                        f"An error occurred while deleting the record: {e}"
-                        , parent=window
+                        "Failed to delete cheque record. Please try again.",
+                        parent=window,
+                        exc=e
                     )
                 tree.delete(selected_item)
 
@@ -696,7 +694,7 @@ FROM Cheques C
             id = row_data[0] 
 
             try:
-                run_query(f"UPDATE Cheques SET Statues = '{text}' WHERE id = {id}", db_name='Cheque.db')
+                execute_non_query(f"UPDATE Cheques SET Statues = '{text}' WHERE id = {id}", db_name='Cheque.db')
 
                 messagebox.showinfo("Success", f"The Cheques is successfully {text}!", parent=window)
 
@@ -712,10 +710,11 @@ FROM Cheques C
                 ))
 
             except sqlite3.Error as e:
-                messagebox.showerror(
+                _show_error(
                     "Database Error",
-                    f"An error occurred while Updating the record: {e}",
-                    parent=window
+                    "Failed to update cheque status. Please try again.",
+                    parent=window,
+                    exc=e
                 )           
 
     context_menu = Menu(window, tearoff=0)

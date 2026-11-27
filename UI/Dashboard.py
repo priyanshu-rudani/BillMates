@@ -1,16 +1,13 @@
 import sys
 from pathlib import Path
-if getattr(sys, 'frozen', False):  # Running as a PyInstaller EXE
-    root_path = Path(sys.executable).parent
-else:  # Running as a Python script
-    root_path = Path(__file__).parent.parent
-sys.path.append(str(root_path))
 
+from utilities.path_utils import (
+    _show_error, center_window, generate_path, read_ini, get_dates_between
+)
+from core.database import query_all
 
-from utilities.path_utils import *
 import tkinter as tk
-from tkinter import Frame, Tk, Button, Menu
-from tkinter import ttk
+from tkinter import Frame, Tk, Button, Menu, ttk
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import matplotlib.pyplot as plt
@@ -81,7 +78,7 @@ class Sidebar(Frame):
             messagebox.showerror("Icon not found", f"Icon file not found at '{icon_path}'.", parent=self)
             return None
         except Exception as e:
-            messagebox.showerror("Error loading icon", f"Error loading icon '{icon_path}'.", parent=self)
+            _show_error("Icon Error", f"Unable to load icon '{icon_path}'.", parent=self, exc=e)
             return None
 
     def _build_menu_items(self):
@@ -229,31 +226,19 @@ class MainFrame(Frame):
         self.Card_data()
 
     def Card_data(self):
-        today = date.today()
-        current_year = today.year
-        current_month = today.month
-
-        if current_month >= 4:  # If current month is April or later
-            start_date = date(current_year, 4, 1).strftime("%d/%m/%Y")
-            end_date_year = current_year + 1
-        else:  # If current month is before April (Jan, Feb, Mar)
-            start_date = date(current_year - 1, 4, 1).strftime("%d/%m/%Y")
-            end_date_year = current_year
-        
-        end_date = date(end_date_year, 3, 31).strftime("%d/%m/%Y")
-        financial_year = f"{end_date_year-1}-{end_date_year}"
+        start_date, end_date, financial_year = get_financial_year_dates()
 
         metrics = ReportRepository.get_financial_dashboard_metrics(start_date, end_date)
         
         self.financial_year_card._update_value(financial_year)
         self.total_sales_card._update_value(metrics["total_sales"])
-        self.total_purchase_card._update_value(-metrics["total_purchase"])
-        self.total_expanse_card._update_value(-metrics["total_operating_expenses"])
-        self.total_cogs_card._update_value(-metrics["total_cogs"])
+        self.total_purchase_card._update_value(metrics["total_purchase"])
+        self.total_expanse_card._update_value(metrics["total_operating_expenses"])
+        self.total_cogs_card._update_value(metrics["total_cogs"])
         self.collected_revenue_card._update_value(metrics["collected_revenue"])
-        self.settled_purchase_card._update_value(-metrics["settled_purchases"])
+        self.settled_purchase_card._update_value(metrics["settled_purchases"])
         self.amount_receivable_card._update_value(metrics["accounts_receivable"])
-        self.amount_payable_card._update_value(-metrics["accounts_payable"])
+        self.amount_payable_card._update_value(metrics["accounts_payable"])
         self.net_profit_Loss_card._update_value(metrics["net_profit_loss"])
     
     def reload_Charts(self):
@@ -392,8 +377,8 @@ class LineChartFrame(Frame):
             END;
         """
 
-        data1 = dict(fetch_data(revenue_q, dates))
-        data2 = dict(fetch_data(expenses_q, dates))
+        data1 = dict(query_all(revenue_q, dates))
+        data2 = dict(query_all(expenses_q, dates))
 
         revenue = [data1.get(day, 0) for day in dates]
         expenses = [data2.get(day, 0) for day in dates]
@@ -486,7 +471,7 @@ class PieChartFrame(Frame):
             AND entity_type = 'Expense'
             GROUP BY Expanse_type
         """
-        data = fetch_data(query)
+        data = query_all(query)
         
         if not data:
             labels, values = ['No Expense'], [0]
@@ -549,18 +534,30 @@ class popupMassage:
         return self.result
         
 
+def get_financial_year_dates(ref_date: date = None):
+    today = ref_date or date.today()
+    if today.month >= 4:
+        start_yr, end_yr = today.year, today.year + 1
+    else:
+        start_yr, end_yr = today.year - 1, today.year
+    return (
+        date(start_yr, 4, 1).strftime("%d/%m/%Y"),
+        date(end_yr, 3, 31).strftime("%d/%m/%Y"),
+        f"{start_yr}-{end_yr}",
+    )
+
+
 def export_year_report(report_type):
     try:
         if report_type not in ["Revenue Reports", "Expense Analysis", "Cash Flow Statement", "Profit and Loss Statement"]:
             return  
 
-        start_date = date.today().replace(month=1, day=1).strftime("%d/%m/%Y")
-        end_date = date.today().replace(month=12, day=31).strftime("%d/%m/%Y")  
+        start_date, end_date, _ = get_financial_year_dates()
     
         export_report(report_type, start_date, end_date)
 
     except Exception as e:
-        messagebox.showerror("Unexpected Error", f"Unexpected error: {e}")
+        _show_error("Report Error", "An unexpected error occurred while generating the annual report.", exc=e)
 
 def ask_backup_exit_choice(parent, title: str, message: str) -> str:
     """
@@ -752,7 +749,10 @@ class App(Tk):
         self.geometry("1280x720")
         self.iconbitmap(generate_path("UI", "assets", "BillMates.ico"))
         self.minsize(1280, 720)
-        self.attributes('-fullscreen', True)
+        try:
+            self.state("zoomed")
+        except tk.TclError:
+            self.attributes('-fullscreen', True)
         Compney_name = str(read_ini("PROFILE", "name"))
         self.title(f"Dashboard - {Compney_name} (Admin) - BillMates")
         self.configure(bg="#E7EBFF")
@@ -781,17 +781,17 @@ class App(Tk):
             "commands": [
                 {"label": "Add Invoice Payments (F4)", "command": lambda: customer_payment_in(parent=self)},
                 {"label": "Add Adjustment", "command": lambda: new_adjustment_ui(parent=self)},
-                {"label": "Payment Getway", "command": lambda: payment_getway(parent=self)},
+                {"label": "Payment Gateway", "command": lambda: payment_getway(parent=self)},
                 {"label": "Manage Payments (F7)", "command": lambda: manage_payments(parent=self)}
             ]
         },
         {
-            "text": "Expance",
+            "text": "Expense",
             "icon": self.relative_to_assets("expanse.png"),
             "commands": [
                 {"label": "Add Purchase Payments (F5)", "command": lambda: supplier_payments_out(parent=self)},
-                {"label": "Add Expance Payments (F6)", "command": lambda: expense_payments_out(parent=self)},
-                {"label": "Add Salery Payments", "command": lambda: pay_salary_ui(parent=self)},
+                {"label": "Add Expense Payments (F6)", "command": lambda: expense_payments_out(parent=self)},
+                {"label": "Add Salary Payments", "command": lambda: pay_salary_ui(parent=self)},
                 {"label": "Manage Payments (F7)", "command": lambda: manage_payments(parent=self)}
             ]
         },
@@ -857,7 +857,7 @@ class App(Tk):
         self.bind('<F10>', lambda event: Reports_ui(parent = self))
         self.bind('<F11>', lambda event: PrintCheque_ui(parent=self))
         
-        self.bind("<Escape>", lambda event: on_closing(self))
+        self.bind("<Escape>", lambda event: self.attributes("-fullscreen", False) if self.attributes("-fullscreen") else None)
         self.protocol("WM_DELETE_WINDOW", lambda: on_closing(self))
 
 
@@ -865,7 +865,7 @@ class App(Tk):
         self.mainloop()
 
     def relative_to_assets(self, path: str) -> Path:
-        ASSETS_PATH = Path(generate_path(root_path, "UI", "assets", "Dashboard"))
+        ASSETS_PATH = Path(generate_path("UI", "assets", "Dashboard"))
         return ASSETS_PATH / Path(path)
 
 

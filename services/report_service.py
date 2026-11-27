@@ -2,12 +2,7 @@
 services/report_service.py
 --------------------------
 Optimized repository and service for billing, ledger, and sales reports.
-* Sargable date ranges via ISO expression conversions and SQLite indexes.
-* Eliminates N+1 queries and duplicate count/sum roundtrips.
-* Single-pass aggregations.
-* Strict filter validation (start <= end, max range, SQL parameter sanitization).
 """
-from __future__ import annotations
 
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
@@ -356,7 +351,7 @@ class ReportRepository:
                 SELECT 
                     COALESCE(SUM(total_amount), 0.0) AS logistics_costs
                 FROM Payments
-                WHERE Expanse_type = 'Transposition' AND {inv_date} BETWEEN ? AND ?
+                WHERE Expanse_type IN ('Transposition', 'Transportation') AND {inv_date} BETWEEN ? AND ?
             ),
             OperatingExpensesData AS (
                 SELECT
@@ -366,9 +361,9 @@ class ReportRepository:
                     COALESCE(SUM(CASE WHEN Expanse_type = 'Marketing' THEN total_amount ELSE 0 END), 0.0) AS marketing_expenses,
                     COALESCE(SUM(CASE WHEN Expanse_type = 'Loan Interest' THEN total_amount ELSE 0 END), 0.0) AS loan_interest_cost,
                     COALESCE(SUM(CASE WHEN Expanse_type = 'Taxes' THEN total_amount ELSE 0 END), 0.0) AS statutory_dues,
-                    COALESCE(SUM(CASE WHEN Expanse_type = 'Other Expances' THEN total_amount ELSE 0 END), 0.0) AS other_expenses
+                    COALESCE(SUM(CASE WHEN Expanse_type IN ('Other Expances', 'Other Expenses') THEN total_amount ELSE 0 END), 0.0) AS other_expenses
                 FROM Payments
-                WHERE Expanse_type IN ('Rent', 'Utilities', 'Maintenance', 'Marketing', 'Loan Interest', 'Taxes', 'Other Expances') 
+                WHERE Expanse_type IN ('Rent', 'Utilities', 'Maintenance', 'Marketing', 'Loan Interest', 'Taxes', 'Other Expances', 'Other Expenses') 
                   AND entity_type = 'Expense' 
                   AND {inv_date} BETWEEN ? AND ?
             )

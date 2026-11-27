@@ -1,14 +1,10 @@
-import sys
+from utilities.path_utils import (
+    _show_error, center_window, generate_path, read_ini, write_ini, get_database_path
+)
+import os
 from pathlib import Path
-
-if getattr(sys, 'frozen', False):  # Running as a PyInstaller EXE
-    root_path = Path(sys.executable).parent
-else:  # Running as a Python script
-    root_path = Path(__file__).parent.parent
-sys.path.append(str(root_path))
- 
-from utilities.path_utils import *
-from tkinter import Tk, Canvas, Entry, Text, Button, PhotoImage, filedialog
+import tkinter as tk
+from tkinter import Canvas, Entry, Button, PhotoImage, filedialog, messagebox
 from utilities.backup import BackupSystem
 from datetime import datetime
 
@@ -150,13 +146,13 @@ class Backup_ui(tk.Toplevel):
 
 
     def relative_to_assets(self, path: str) -> Path:
-        ASSETS_PATH = Path(generate_path(root_path, "UI", "assets", "frame11"))
+        ASSETS_PATH = Path(generate_path("UI", "assets", "frame11"))
         return ASSETS_PATH / Path(path)
     
     def generateBackup(self):
         self.update_idletasks()
         self.config(cursor="watch")
-        source_folder = database_path()
+        source_folder = get_database_path()
         if not source_folder or not os.path.exists(source_folder):
             messagebox.showerror("Error", "Database folder not found!", parent=self)
             return
@@ -181,7 +177,7 @@ class Backup_ui(tk.Toplevel):
                 else:   
                     messagebox.showwarning("Backup Error", "Backup Generation process failed.", parent=self)
             except Exception as e:
-                messagebox.showwarning("Backup Exception Error", f"Backup Generation failed. \n Error: {e}", parent=self)
+                _show_error("Backup Error", "Backup generation failed. Please check destination folder permissions and try again.", parent=self, exc=e)
         self.config(cursor="")
 
 

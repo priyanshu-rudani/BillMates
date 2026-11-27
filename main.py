@@ -2,16 +2,24 @@
 import sys
 from pathlib import Path
 
-if getattr(sys, 'frozen', False):  # Running as a PyInstaller EXE
-    root_path = Path(sys.executable).parent
-else:  # Running as a Python script
-    root_path = Path(__file__).parent.parent
-sys.path.append(str(root_path))
+def get_project_root() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).parent
+    return Path(__file__).resolve().parent
+
+
+def ensure_root_on_sys_path() -> Path:
+    root = get_project_root()
+    root_str = str(root)
+    if root_str not in sys.path:
+        sys.path.insert(0, root_str)
+    return root
 
 from core.environment import EnvironmentSetup
 
 
 def main():
+    ensure_root_on_sys_path()
     setup = EnvironmentSetup()
     setup.setup()
 

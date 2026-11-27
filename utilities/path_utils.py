@@ -1,20 +1,29 @@
-import sys
 import os
-from pathlib import Path
 import tkinter as tk
 from tkinter import messagebox
 import logging
 import configparser
 from datetime import datetime, timedelta
+from core.database import query_all, query_one, get_database_path
+
 
 logger = logging.getLogger(__name__)
 
 
-def _show_error(title: str, message: str) -> None:
-    """Log always; show dialog only if Tk is usable."""
-    logger.error("%s: %s", title, message)
+def _show_error(title: str, message: str, parent=None, exc=None) -> None:
+    """
+    Log backend/system error with traceback, and show a clean user-friendly
+    error dialog in the UI (if Tk is usable).
+    """
+    if exc is not None:
+        logger.error("%s: %s | Exception: %s", title, message, exc, exc_info=True)
+    else:
+        logger.error("%s: %s", title, message)
     try:
-        messagebox.showerror(title, message)
+        if parent is not None:
+            messagebox.showerror(title, message, parent=parent)
+        else:
+            messagebox.showerror(title, message)
     except Exception:
         pass
 
@@ -22,10 +31,8 @@ def _show_error(title: str, message: str) -> None:
 def generate_path(*path_parts) -> str:
     """Generates a cross-platform path."""
     
-    if getattr(sys, 'frozen', False):  # Running as a PyInstaller EXE
-        root_path = Path(sys.executable).parent
-    else:  # Running as a Python script
-        root_path = Path(__file__).parent.parent
+    from main import ensure_root_on_sys_path
+    root_path = ensure_root_on_sys_path()
 
     full_path = root_path.joinpath(*path_parts)  # Join root path with provided parts
     return full_path
@@ -51,32 +58,25 @@ def center_window(window, width, height):
 
 
 
-from core.database import query_all, execute_non_query, get_database_path
-
-database_path = get_database_path
-fetch_data = query_all
-run_query = execute_non_query
-
-
 
 def get_client_id(customer_name):
-    result = fetch_data('''SELECT id FROM Clients WHERE name = ?''', (customer_name,))
-    return result[0][0] if result else 0
+    result = query_one('''SELECT id FROM Clients WHERE name = ?''', (customer_name,))
+    return result[0] if result else 0
 
 def get_client_name(customer_id):
-    result = fetch_data('''SELECT name FROM Clients WHERE id = ?''', (customer_id,))
-    return result[0][0] if result else 0
+    result = query_one('''SELECT name FROM Clients WHERE id = ?''', (customer_id,))
+    return result[0] if result else 0
 
 def get_client_type(client_name):
-    result = fetch_data("SELECT client_type FROM Clients WHERE name = ?", (client_name,))
-    return result[0][0] if result else 0
+    result = query_one("SELECT client_type FROM Clients WHERE name = ?", (client_name,))
+    return result[0] if result else 0
 
 def fetch_client_names(type): 
-    client_names = fetch_data("SELECT name FROM Clients WHERE client_type = ?", (type,))
+    client_names = query_all("SELECT name FROM Clients WHERE client_type = ?", (type,))
     return [name[0] for name in client_names]
 
 def fetch_client_id(type): 
-    client_names = fetch_data("SELECT id FROM Clients WHERE client_type = ?", (type,))
+    client_names = query_all("SELECT id FROM Clients WHERE client_type = ?", (type,))
     return [name[0] for name in client_names]
 
 
@@ -160,11 +160,12 @@ def Top_Close(root, parent):
     # If the immediate parent window still exists, give the event grab back to it.
     # This is crucial for correctly handling nested modal dialogs.
 
-    try:
-        if parent.winfo_exists():
-            parent.grab_set()
-    except:
-        messagebox.showwarning("Error", f"No parent Window Found.", parent=app_root)
+    if parent is not None:
+        try:
+            if parent.winfo_exists():
+                parent.grab_set()
+        except Exception:
+            pass
 
     # Destroy the Toplevel window.
     root.destroy()
@@ -185,8 +186,8 @@ def Top_Close(root, parent):
         else:
             pass
     except Exception as e:
-        # Show a clear error message, parented to the main application window for correct stacking.
-        messagebox.showwarning("Data Re-load Error", f"Unable to Reload Dashboard Data.\nError: {e}", parent=app_root)
+        logger.warning("Unable to reload dashboard data: %s", e, exc_info=True)
+        messagebox.showwarning("Data Reload Warning", "Unable to reload dashboard data. Please refresh manually.", parent=app_root)
 
         
 
@@ -259,5 +260,5 @@ def get_dates_between(start_date, end_date):
         messagebox.showerror("Input Error", str(ve))
         return []
     except Exception as e:
-        messagebox.showerror("Unexpected Error", f"An unexpected error occurred: {e}")
+        _show_error("Date Processing Error", "An unexpected error occurred while processing dates.", exc=e)
         return []

@@ -1,23 +1,16 @@
 import sys
-from pathlib import Path
-
-if getattr(sys, 'frozen', False):  # Running as a PyInstaller EXE
-    root_path = Path(sys.executable).parent
-else:  # Running as a Python script
-    root_path = Path(__file__).parent.parent
-sys.path.append(str(root_path))
-
 import os
 from tkinter import messagebox
-from utilities.path_utils import generate_path, database_path
+from utilities.path_utils import get_database_path, _show_error
 from core.db_creater import create_database
 from UI.Dashboard import App
 from UI.add_company import add_company
 
+
 class EnvironmentSetup:
     def __init__(self):
-        self.db_path = database_path("clients.db")
-        self.profile_path = database_path("config.ini")
+        self.db_path = get_database_path("clients.db")
+        self.profile_path = get_database_path("config.ini")
 
     def setup(self):
         try:
@@ -25,21 +18,21 @@ class EnvironmentSetup:
             self.ensure_database()
             self.ensure_profile()
         except Exception as e:
-            messagebox.showerror("Setup failed", f"An error occurred: {str(e)}")
+            _show_error("Setup Error", "An error occurred during application startup. Please check the logs or contact support.", exc=e)
             sys.exit(1)
 
     def ensure_directories(self):
-        db_folder = database_path()
+        db_folder = get_database_path()
         if not os.path.exists(db_folder):
             os.makedirs(db_folder, exist_ok=True)
 
     def ensure_database(self):
         try:
             if not create_database():
-                messagebox.showerror("Error", "Failed to initialize application databases.")
+                _show_error("Database Error", "Failed to initialize application databases. Please check file permissions or contact support.")
                 sys.exit(1)
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to initialize database: {e}")
+            _show_error("Database Error", "Failed to initialize application database. Please check file permissions or contact support.", exc=e)
             sys.exit(1)
 
 

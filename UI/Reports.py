@@ -1,26 +1,24 @@
-import sys
+
 from pathlib import Path
+from utilities.path_utils import (
+    center_window, generate_path, Top_Close,
+    fetch_client_names
+)
+from core.database import query_all
 
-if getattr(sys, 'frozen', False):  # Running as a PyInstaller EXE
-    root_path = Path(sys.executable).parent
-else:  # Running as a Python script
-    root_path = Path(__file__).parent.parent
-sys.path.append(str(root_path))
- 
-from utilities.path_utils import *
-
-from tkinter import Tk
-from tkinter import ttk, Canvas, Frame, messagebox, Button, PhotoImage, NORMAL, DISABLED, HORIZONTAL, VERTICAL
-from tkinter import Menu
+import tkinter as tk
+from tkinter import ttk, Canvas, Frame, messagebox, Button, PhotoImage, Menu, NORMAL, DISABLED, HORIZONTAL, VERTICAL
 from tkinter.ttk import Combobox
 from tkcalendar import DateEntry
 from datetime import datetime, timedelta, date
 from utilities.GenerateReport import *
-from UI.gui import *
+from UI.gui import (
+    customer_payment_in, supplier_payments_out, expense_payments_out, pay_salary_ui, new_adjustment_ui
+)
 
 
 
-ASSETS_PATH = Path(generate_path(root_path, "UI", "assets", "frame7"))
+ASSETS_PATH = Path(generate_path("UI", "assets", "frame7"))
 
 
 def relative_to_assets(path: str) -> Path:
@@ -40,9 +38,18 @@ def Reports_ui(parent = None):
             FROM Payments
         """
 
-        dates = [row[0] for row in fetch_data(query)]
+        dates = [row[0] for row in query_all(query) if row[0]]
 
-        parsed_dates = [datetime.strptime(date, '%d/%m/%Y') for date in dates]
+        parsed_dates = []
+        for d in dates:
+            try:
+                parsed_dates.append(datetime.strptime(d, '%d/%m/%Y'))
+            except (ValueError, TypeError):
+                continue
+
+        if not parsed_dates:
+            today_str = datetime.now().strftime('%d/%m/%Y')
+            return today_str, today_str
 
         min_date = min(parsed_dates)
         max_date = max(parsed_dates)
@@ -373,13 +380,9 @@ def Reports_ui(parent = None):
         if exclude_last_n_rows > 0:
             data = data[:-exclude_last_n_rows]
 
-        for col in columns:
-            tree.heading(col, text=col, anchor="center")
-            tree.column(col, anchor="center", width=150)
-
         for idx, col in enumerate(columns):
             # Set column widths if provided, else default to 150
-            width = column_widths[idx] if column_widths and idx < len(column_widths) else 10
+            width = column_widths[idx] if column_widths and idx < len(column_widths) else 150
             tree.heading(col, text=col, anchor="center")  # Configure column heading
             tree.column(col, anchor="center", width=width)  # Configure column width and alignment
 
@@ -417,7 +420,7 @@ def Reports_ui(parent = None):
             if client_name == 'Select' or client_name == None:
                 messagebox.showerror("Error", "Please select a client", parent=window)
                 return
-            columns  = ["Invoice No.", "Date", "Suppiler Name", "Total", "Paid", "Unpaid", "Paid Status", "Reference No."]
+            columns  = ["Invoice No.", "Date", "Supplier Name", "Total", "Paid", "Unpaid", "Paid Status", "Reference No."]
             data = purchase_report(client_name, starting_date, ending_date)
             update_treeview(columns, data, exclude_last_n_rows = 4)
 
@@ -773,8 +776,8 @@ def Reports_ui(parent = None):
     Payments_dropdown = Menu(window, tearoff=0, bg="white", fg="black", font=("Poppins", 10, "normal"))
     Payments_dropdown.add_command(label="  Add Invoice Payments    ", command=lambda: customer_payment_in(parent=window))
     Payments_dropdown.add_command(label="  Add Purchase Payments   ", command=lambda: supplier_payments_out(parent=window))
-    Payments_dropdown.add_command(label="  Add Expance Payments    ", command=lambda: expense_payments_out(parent=window))
-    Payments_dropdown.add_command(label="  Add Salery Payments     ", command=lambda: pay_salary_ui(parent=window))
+    Payments_dropdown.add_command(label="  Add Expense Payments    ", command=lambda: expense_payments_out(parent=window))
+    Payments_dropdown.add_command(label="  Add Salary Payments     ", command=lambda: pay_salary_ui(parent=window))
     button_4.config(command=lambda: toggle_submenu(Payments_dropdown, button_4))
 
     treeview_frame = Frame(window)

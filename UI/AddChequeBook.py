@@ -1,14 +1,10 @@
-import sys
-from pathlib import Path
+from utilities.path_utils import (
+    _show_error, center_window, generate_path
+)
+from core.database import query_all, query_one, execute_non_query
 
-if getattr(sys, 'frozen', False):  # Running as a PyInstaller EXE
-    root_path = Path(sys.executable).parent
-else:  # Running as a Python script
-    root_path = Path(__file__).parent.parent
-sys.path.append(str(root_path))
- 
-from utilities.path_utils import *
 import tkinter as tk
+from tkinter import messagebox
 import re
 from datetime import datetime
 from tkinter import ttk
@@ -57,17 +53,17 @@ def addChequeBook_ui(ChequeBook_id = None, parent = None):
                         issued_date = '{date}'
                     WHERE id = {ChequeBook_id}
                 """
-                run_query(query, db_name='Cheque.db')
-            except ValueError:
-                messagebox.showwarning("Database Error", "Cheque Book not Updated.", parent=window)
+                execute_non_query(query, db_name='Cheque.db')
+            except Exception as e:
+                _show_error("Database Error", "Failed to update cheque book.", parent=window, exc=e)
         
         else:
-            isNameExist = fetch_data(f"SELECT 1 FROM ChequeBook WHERE book_name = '{bookName}';", db_name='Cheque.db')
+            isNameExist = query_one(f"SELECT 1 FROM ChequeBook WHERE book_name = '{bookName}';", db_name='Cheque.db')
             if isNameExist:
                 messagebox.showwarning("Duplicate Entry", "Cheque Book name is already exists try with other name.", parent=window)
                 return
 
-            if not bankName or accountHolder or accountNo:
+            if not bankName or not accountHolder or not accountNo:
                 response = messagebox.askyesno(
                     "Warning!",
                     "Cheque book details are missing.\nDo you still want to create Cheque Book?",
@@ -77,14 +73,14 @@ def addChequeBook_ui(ChequeBook_id = None, parent = None):
                     return
 
             try:
-                run_query(f"""
+                execute_non_query(f"""
                     INSERT INTO ChequeBook (
                         book_name, bank_name, holder_name, account_no, starting_ChequeNo, Current_ChequeNo, total_cheques, issued_date
                     ) VALUES (
                         '{bookName}', '{bankName}', '{accountHolder}', '{accountNo}', {startCq}, {currentCq}, {totalCq}, '{date}');
                 """, db_name='Cheque.db')
-            except ValueError:
-                messagebox.showwarning("Database Error", "Cheque Book not Added.", parent=window)
+            except Exception as e:
+                _show_error("Database Error", "Failed to create cheque book.", parent=window, exc=e)
 
         cheque_name_var.set("")
         acc_holder_var.set("")
@@ -109,7 +105,7 @@ def addChequeBook_ui(ChequeBook_id = None, parent = None):
     def Load_ChequeBook(ChequeBook_id):
 
         filter = f"SELECT * FROM ChequeBook WHERE id = {ChequeBook_id}"
-        Data = fetch_data(filter, db="Cheque.db")[0]
+        Data = query_all(filter, db_name="Cheque.db")[0]
 
         cheque_name_var.set(Data[1])
         bankName_Entry.set(Data[2])

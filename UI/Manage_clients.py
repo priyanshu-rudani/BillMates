@@ -1,13 +1,10 @@
 import sys
 from pathlib import Path
-
-if getattr(sys, 'frozen', False):  # Running as a PyInstaller EXE
-    root_path = Path(sys.executable).parent
-else:  # Running as a Python script
-    root_path = Path(__file__).parent.parent
-sys.path.append(str(root_path))
- 
-from utilities.path_utils import *
+from utilities.path_utils import (
+    _show_error, center_window, generate_path, Top_Close, SearchBox
+)
+from core.database import query_all, execute_non_query
+import tkinter as tk
 
 from tkinter import Canvas, Entry, Button, PhotoImage, messagebox
 from tkinter import ttk
@@ -19,7 +16,7 @@ from UI.addClient import new_client_ui
 
 def manage_clients(parent = None):
 
-    ASSETS_PATH = Path(generate_path(root_path, "UI", "assets", "frame6"))
+    ASSETS_PATH = Path(generate_path("UI", "assets", "frame6"))
     
     def relative_to_assets(path: str) -> Path:
         return ASSETS_PATH / Path(path)
@@ -34,7 +31,7 @@ def manage_clients(parent = None):
 
         if selected_option == "Name":
             # Fetch all party names (Clients, Suppliers, Staff)
-            client_names = [r[0] for r in fetch_data("SELECT DISTINCT name FROM Clients ORDER BY name ASC")]
+            client_names = [r[0] for r in query_all("SELECT DISTINCT name FROM Clients ORDER BY name ASC")]
             entry_2 = Combobox(
                 window,
                 values=client_names,
@@ -94,14 +91,14 @@ def manage_clients(parent = None):
                 quary = None
                 
             if quary is not None:
-                data = [str(row[0]) for row in fetch_data(quary)]
+                data = [str(row[0]) for row in query_all(quary)]
                 listbox = tk.Listbox(window, font=("VarelaRound Regular", 14 * -1), height=min(len(data), 6))
                 SearchBox(entry_2, listbox, data)
 
 
     def refresh_table():
         query = "SELECT id, name, contact_no, gst, city, state, client_type, closing_bal FROM Clients"
-        data = fetch_data(query)
+        data = query_all(query)
         populate_tree(data)
 
     def open_edit_party(selected_item=None):
@@ -141,7 +138,7 @@ def manage_clients(parent = None):
             base_query = "SELECT id, name, contact_no, gst, city, state, client_type, closing_bal FROM Clients"
 
             if search_type == "All":
-                result = fetch_data(base_query)
+                result = query_all(base_query)
             else:
                 query_map = {
                     "ID": "id",
@@ -157,19 +154,19 @@ def manage_clients(parent = None):
 
                 if not search_term or search_term == "Select":
                     # If field is blank, show all records rather than erroring out
-                    result = fetch_data(base_query)
+                    result = query_all(base_query)
                 elif search_type == "ID":
                     # Exact numeric/ID match
                     query = f"{base_query} WHERE id = ?"
-                    result = fetch_data(query, (search_term,))
+                    result = query_all(query, (search_term,))
                 elif search_type == "Type":
                     # Exact category match (Client, Supplier, Staff)
                     query = f"{base_query} WHERE client_type = ?"
-                    result = fetch_data(query, (search_term,))
+                    result = query_all(query, (search_term,))
                 else:
                     # Case-insensitive partial matching for Name, Contact Number, City
                     query = f"{base_query} WHERE {column} LIKE ?"
-                    result = fetch_data(query, (f"%{search_term}%",))
+                    result = query_all(query, (f"%{search_term}%",))
 
             populate_tree(result)
 
@@ -177,12 +174,12 @@ def manage_clients(parent = None):
                 messagebox.showinfo("No Results", "No matching clients found.", parent=window)
 
         except Exception as e:
-            messagebox.showerror("Error", f"Error searching clients: {e}", parent=window)
+            _show_error("Search Error", "An error occurred while searching clients. Please try again.", parent=window, exc=e)
 
     def reset():
         entry_1.set("Select")
         update_search_field(None)
-        data = fetch_data("SELECT id, name, contact_no, gst, city, state, client_type, closing_bal FROM Clients")
+        data = query_all("SELECT id, name, contact_no, gst, city, state, client_type, closing_bal FROM Clients")
         populate_tree(data)
 
 
@@ -190,24 +187,35 @@ def manage_clients(parent = None):
         # Get the ID from the selected row (assuming the ID is in the first column)
         item_values = tree.item(selected_item, "values")
         item_id = item_values[0]  # ID column value
-        
+        client_name = item_values[1] if len(item_values) > 1 else str(item_id)
+
+        try:
+            inv_count = query_one("SELECT COUNT(*) FROM Invoices WHERE client_id = ?", (item_id,))[0]
+            pur_count = query_one("SELECT COUNT(*) FROM Purchase WHERE client_id = ?", (item_id,))[0]
+            pay_count = query_one("SELECT COUNT(*) FROM Payments WHERE entity_id = ?", (item_id,))[0]
+        except sqlite3.Error as e:
+            _show_error("Database Error", "Failed to check linked financial records.", parent=window, exc=e)
+            return
+
+        if inv_count > 0 or pur_count > 0 or pay_count > 0:
+            messagebox.showwarning(
+                "Cannot Delete Party",
+                f"Cannot delete '{client_name}' because they have existing financial records "
+                f"({inv_count} Invoices, {pur_count} Purchases, {pay_count} Payments).\n\n"
+                "Deleting this party would erase historical financial and tax audit trails.",
+                parent=window
+            )
+            return
+
         # Confirm deletion
-        result = messagebox.askyesno("Delete", f"Are you sure you want to delete Client with ID {item_id}?", parent=window)
+        result = messagebox.askyesno("Delete", f"Are you sure you want to delete '{client_name}' (ID {item_id})?", parent=window)
         if result:
             try:
-                # Execute the SQL to delete the record from the database
-                run_query("DELETE FROM Clients WHERE id = ?", (item_id,))
-                run_query("DELETE FROM Payments WHERE entity_id = ?", (item_id,))
-                run_query("DELETE FROM Invoices WHERE client_id = ?", (item_id,))
-                run_query("DELETE FROM InvoiceItems WHERE client_id = ?", (item_id,))
-                run_query("DELETE FROM Purchase WHERE client_id = ?", (item_id,))
-                run_query("DELETE FROM PurchaseItems WHERE client_id = ?", (item_id,))
-                
-                # Delete the row from the Treeview
+                execute_non_query("DELETE FROM Clients WHERE id = ?", (item_id,))
                 tree.delete(selected_item)
                 messagebox.showinfo("Deleted", "Client successfully deleted.", parent=window)
             except sqlite3.Error as e:
-                messagebox.showerror("Error", f"Failed to delete Client: {e}", parent=window)
+                _show_error("Database Error", "Failed to delete client record. Please try again.", parent=window, exc=e)
 
     def show_right_click_menu(event):
         # Identify row under cursor if not already selected
@@ -230,7 +238,7 @@ def manage_clients(parent = None):
     window.transient(parent)
     window.grab_set()
     
-    window.title("Manage Partys")
+    window.title("Manage Parties")
     center_window(window, 1224, 640)
     window.configure(bg = "#E7EBFF")
 
@@ -389,7 +397,7 @@ def manage_clients(parent = None):
 
 
     query = """SELECT id, name, contact_no, gst, city, state, client_type, closing_bal FROM Clients"""
-    data = fetch_data(query)
+    data = query_all(query)
 
     for row in data:
         tree.insert("", "end", values=row)

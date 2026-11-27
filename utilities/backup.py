@@ -134,13 +134,12 @@ class BackupSystem:
         if not self.zipped_file_path:
             return None
 
-        # Step 2: Encrypt the Zip File
-        encrypted_file = self._encrypt_file(self.zipped_file_path, encryption_password)
-
-        if not encrypted_file:
-            return None
-
-        return encrypted_file
+        try:
+            # Step 2: Encrypt the Zip File
+            encrypted_file = self._encrypt_file(self.zipped_file_path, encryption_password)
+            return encrypted_file or None
+        finally:
+            self.cleanup_temp_zip()
     
     def perform_decrypt_and_restore(self, encrypted_file_path: str, password: str) -> bool:
         """

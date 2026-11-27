@@ -3,20 +3,15 @@ services/invoice_service.py
 ---------------------------
 Shared invoice business logic for the Sales AND Purchase invoice windows.
 
-* No tkinter imports -> UI-independent, unit-testable.
-* Everything that differs between Sales and Purchase lives in `InvoiceConfig`.
-* UI talks to `InvoiceService`; failures surface as `InvoiceError`
-  (the UI decides how to display them).
 """
-from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Union
 
-from utilities.path_utils import fetch_data, run_query, get_client_id, read_ini
-from core.database import get_db_connection, query_one, query_all, execute_non_query, execute_query
+from utilities.path_utils import get_client_id, read_ini
+from core.database import get_db_connection, query_all
 from utilities.invoice_generator import create_invoice
 
 DATE_FMT = "%d/%m/%Y"
@@ -135,10 +130,21 @@ class ItemInput:
 
     def amounts(self) -> ItemAmounts:
         try:
-            return calc_item(float(self.qty), float(self.price),
-                             float(self.gst_rate or 0), float(self.discount or 0))
+            qty = float(self.qty)
+            price = float(self.price)
+            gst_rate = float(self.gst_rate or 0)
+            discount = float(self.discount or 0)
         except ValueError:
             raise InvoiceError("Please enter valid quantity and price.", "Invalid Input")
+        if qty <= 0:
+            raise InvoiceError("Quantity must be greater than 0.", "Invalid Input")
+        if price < 0:
+            raise InvoiceError("Price cannot be negative.", "Invalid Input")
+        if discount < 0 or discount > 100:
+            raise InvoiceError("Discount must be between 0% and 100%.", "Invalid Input")
+        if gst_rate < 0:
+            raise InvoiceError("GST rate cannot be negative.", "Invalid Input")
+        return calc_item(qty, price, gst_rate, discount)
 
 
 @dataclass
@@ -316,7 +322,7 @@ class InvoiceService:
 
     # ---- lookups ------------------------------------------------------------
     def client_names(self) -> List[str]:
-        rows = fetch_data("SELECT name FROM Clients WHERE client_type = ?", (self.cfg.client_type,))
+        rows = query_all("SELECT name FROM Clients WHERE client_type = ?", (self.cfg.client_type,))
         return [r[0] for r in rows]
 
     def client_id(self, client_name: str) -> int:
@@ -324,7 +330,7 @@ class InvoiceService:
 
     def client_profile(self, client_name: str) -> ClientProfile:
         cid = self.client_id(client_name)
-        rows = fetch_data("SELECT * FROM Clients WHERE client_type = ? AND name = ?",
+        rows = query_all("SELECT * FROM Clients WHERE client_type = ? AND name = ?",
                           (self.cfg.client_type, client_name))
         if not rows:
             raise InvoiceError(f"{self.cfg.client_label} not found.", "Error", "info")
@@ -335,7 +341,7 @@ class InvoiceService:
 
         next_no = None
         if self.cfg.auto_invoice_no:
-            res = fetch_data(f"SELECT MAX(invoice_no) FROM {self.cfg.invoices_table} WHERE client_id = ?", (cid,))
+            res = query_all(f"SELECT MAX(invoice_no) FROM {self.cfg.invoices_table} WHERE client_id = ?", (cid,))
             last = res[0][0] if res and res[0] else None
             next_no = 1 if last is None else int(last) + 1
         return ClientProfile(cid, contact_display, row[3] or "", next_no)
@@ -346,7 +352,7 @@ class InvoiceService:
         c = self.cfg
         tables = tuple(c.item_history_tables)
         union = " UNION ".join(f"SELECT {col} AS v FROM {table}" for table in tables)
-        values = {str(r[0]).strip() for r in fetch_data(f"SELECT DISTINCT v FROM ({union})")
+        values = {str(r[0]).strip() for r in query_all(f"SELECT DISTINCT v FROM ({union})")
                   if r[0] is not None and str(r[0]).strip()}
         values |= {getattr(d, col).strip() for d in self.draft.items if (getattr(d, col) or "").strip()}
         return sorted(values, key=str.lower)
@@ -365,7 +371,7 @@ class InvoiceService:
             return None
         
         for table in c.item_history_tables:
-            rows = fetch_data(f"SELECT item_code, item_name FROM {table} WHERE {by} = ? LIMIT 1", (value,))
+            rows = query_all(f"SELECT item_code, item_name FROM {table} WHERE {by} = ? LIMIT 1", (value,))
             if rows:
                 return ItemMaster(rows[0][0] or "", rows[0][1] or "", None)
         for item in self.draft.items:
@@ -384,10 +390,10 @@ class InvoiceService:
         if not invoice_no or not cid:
             return False
         if exclude_invoice_id is not None:
-            res = fetch_data(f"SELECT COUNT(*) FROM {self.cfg.invoices_table} WHERE invoice_no = ? AND client_id = ? AND invoice_id != ?",
+            res = query_all(f"SELECT COUNT(*) FROM {self.cfg.invoices_table} WHERE invoice_no = ? AND client_id = ? AND invoice_id != ?",
                              (invoice_no, cid, exclude_invoice_id))
         else:
-            res = fetch_data(f"SELECT COUNT(*) FROM {self.cfg.invoices_table} WHERE invoice_no = ? AND client_id = ?",
+            res = query_all(f"SELECT COUNT(*) FROM {self.cfg.invoices_table} WHERE invoice_no = ? AND client_id = ?",
                              (invoice_no, cid))
         return bool(res and res[0][0] > 0)
 
@@ -433,7 +439,7 @@ class InvoiceService:
                 JOIN Clients c ON i.client_id = c.id
                 WHERE i.invoice_id = ?
             """
-            rows = fetch_data(sql_header, (inv_id,))
+            rows = query_all(sql_header, (inv_id,))
         elif inv_no is not None and cid is not None:
             sql_header = f"""
                 SELECT 
@@ -446,7 +452,7 @@ class InvoiceService:
                 JOIN Clients c ON i.client_id = c.id
                 WHERE i.invoice_no = ? AND i.client_id = ?
             """
-            rows = fetch_data(sql_header, (inv_no, cid))
+            rows = query_all(sql_header, (inv_no, cid))
         else:
             raise InvoiceError("Insufficient parameters to locate invoice.", "Load Error")
 
@@ -482,7 +488,7 @@ class InvoiceService:
             WHERE invoice_no = ? AND client_id = ?
             ORDER BY id ASC
         """
-        item_rows = fetch_data(sql_items, (rec_inv_no, rec_cid))
+        item_rows = query_all(sql_items, (rec_inv_no, rec_cid))
 
         self.draft.clear()
         self.draft._next_id = 1
@@ -591,7 +597,7 @@ class InvoiceService:
 
     # ---- totals -------------------------------------------------------------
     def total(self) -> float:
-        return self.draft.total
+        return float(round(self.draft.total))
 
     def remaining(self, paid_text: str) -> float:
         """total - paid. Raises ValueError if `paid_text` is not a number."""
@@ -607,7 +613,7 @@ class InvoiceService:
         gross = sum(d.total for d in items)
 
         company_state = read_ini("PROFILE", "state")
-        st = fetch_data("SELECT state FROM Clients WHERE id = ?", (cid,))
+        st = query_all("SELECT state FROM Clients WHERE id = ?", (cid,))
         client_state = st[0][0] if st else None
 
         taxable = sub_total - discount
@@ -645,6 +651,8 @@ class InvoiceService:
             paid = float(f.amount_paid) if f.amount_paid else 0.0
         except ValueError:
             raise InvoiceError("Please enter valid paid amount.", "Invalid Input")
+        if paid < 0:
+            raise InvoiceError("Paid amount cannot be negative.", "Invalid Input")
 
         if len(self.draft) == 0:
             raise InvoiceError("Enter at least 1 Item to save the Invoice", "Save Error", "info")
@@ -654,7 +662,7 @@ class InvoiceService:
 
         remarks = (f.remarks or "").strip() or " "
         reference = f.reference_no or " "
-        remaining = total - paid
+        remaining = round(total - paid, 2)
         status = payment_status(total, paid)
 
         with get_db_connection() as conn:
@@ -667,18 +675,23 @@ class InvoiceService:
                     raise InvoiceError(f"Invoice ID {invoice_id} not found.", "Not Found")
                 old_inv_no, old_cid, old_total, old_paid = old_row
                 old_total = float(old_total or 0.0)
+                old_paid = float(old_paid or 0.0)
+                old_net = old_total - old_paid
+                new_net = total - paid
 
                 # Reconcile client closing balance
                 if old_cid == cid:
-                    delta = total - old_total
+                    delta = new_net - old_net
                     if delta != 0.0:
                         cursor.execute("UPDATE Clients SET closing_bal = COALESCE(closing_bal, 0) + ? WHERE id = ?",
-                                       (float(c.balance_sign * delta), cid))
+                                       (round(float(c.balance_sign * delta), 2), cid))
                 else:
-                    cursor.execute("UPDATE Clients SET closing_bal = COALESCE(closing_bal, 0) - ? WHERE id = ?",
-                                   (float(c.balance_sign * old_total), old_cid))
-                    cursor.execute("UPDATE Clients SET closing_bal = COALESCE(closing_bal, 0) + ? WHERE id = ?",
-                                   (float(c.balance_sign * total), cid))
+                    if old_net != 0.0:
+                        cursor.execute("UPDATE Clients SET closing_bal = COALESCE(closing_bal, 0) - ? WHERE id = ?",
+                                       (round(float(c.balance_sign * old_net), 2), old_cid))
+                    if new_net != 0.0:
+                        cursor.execute("UPDATE Clients SET closing_bal = COALESCE(closing_bal, 0) + ? WHERE id = ?",
+                                       (round(float(c.balance_sign * new_net), 2), cid))
 
                 # Update invoice header
                 cursor.execute(f"""UPDATE {c.invoices_table}
@@ -733,8 +746,10 @@ class InvoiceService:
                     cursor.execute(f"INSERT INTO {c.items_table} ({self._ITEM_COLS}) VALUES ({', '.join('?' * 13)})",
                                   self._row_values(inv_no, cid, d))
 
-                cursor.execute("UPDATE Clients SET closing_bal = COALESCE(closing_bal, 0) + ? WHERE id = ?",
-                              (float(c.balance_sign * total), cid))
+                net_delta = total - paid
+                if net_delta != 0.0:
+                    cursor.execute("UPDATE Clients SET closing_bal = COALESCE(closing_bal, 0) + ? WHERE id = ?",
+                                  (round(float(c.balance_sign * net_delta), 2), cid))
 
                 if paid > 0:
                     cursor.execute("""INSERT INTO Payments

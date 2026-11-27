@@ -1,16 +1,12 @@
-import sys
 from pathlib import Path
 
-if getattr(sys, 'frozen', False):  # Running as a PyInstaller EXE
-    root_path = Path(sys.executable).parent
-else:  # Running as a Python script
-    root_path = Path(__file__).parent.parent
-sys.path.append(str(root_path))
- 
-from utilities.path_utils import *
+from utilities.path_utils import (
+    _show_error, center_window, generate_path
+)
+from core.database import query_all, execute_non_query
 
-from tkinter import Canvas, Entry, Button, PhotoImage, messagebox
-from tkinter import ttk
+import tkinter as tk
+from tkinter import Canvas, Entry, Button, PhotoImage, messagebox, ttk
 from tkinter.ttk import Combobox
 import sqlite3
 from utilities import text
@@ -20,7 +16,7 @@ from UI.AddChequeBook import addChequeBook_ui
 
 def Manage_chequeBook(parent = None):
 
-    ASSETS_PATH = Path(generate_path(root_path, "UI", "assets", "frame6"))
+    ASSETS_PATH = Path(generate_path("UI", "assets", "frame6"))
     
     def relative_to_assets(path: str) -> Path:
         return ASSETS_PATH / Path(path)
@@ -105,10 +101,10 @@ def Manage_chequeBook(parent = None):
             
             if type == "All ChequeBooks":
                 query = f"SELECT id, book_name, bank_name, holder_name, account_no, starting_ChequeNo, Current_ChequeNo, total_cheques, issued_date FROM ChequeBook"
-                result = fetch_data(query, db_name='Cheque.db')
+                result = query_all(query, db_name='Cheque.db')
             else: 
                 query = f"SELECT id, book_name, bank_name, holder_name, account_no, starting_ChequeNo, Current_ChequeNo, total_cheques, issued_date FROM ChequeBook WHERE {query_map[type]} LIKE '%' || '{search}' || '%'"
-                result = fetch_data(query, db_name='Cheque.db')
+                result = query_all(query, db_name='Cheque.db')
             
             # Clear current treeview data
             tree.delete(*tree.get_children())
@@ -119,7 +115,7 @@ def Manage_chequeBook(parent = None):
             else:
                 messagebox.showinfo("Error", f"No result Found", parent=window)
         except Exception as e:
-                messagebox.showinfo("Error", f"Error fetching ChequeBook: {e}", parent=window)
+            _show_error("Query Error", "Failed to retrieve cheque book records. Please try again.", parent=window, exc=e)
         
     def reset():
         entry_1.delete(0, tk.END)
@@ -147,7 +143,7 @@ def Manage_chequeBook(parent = None):
         tree.delete(*tree.get_children())
 
         query = f"SELECT id, book_name, bank_name, holder_name, account_no, starting_ChequeNo, Current_ChequeNo, total_cheques, issued_date FROM ChequeBook"
-        data = fetch_data(query, db_name='Cheque.db')
+        data = query_all(query, db_name='Cheque.db')
 
         for row in data:
             tree.insert("", "end", values=row)
@@ -163,13 +159,13 @@ def Manage_chequeBook(parent = None):
         if result:
             try:
 
-                run_query(f"DELETE FROM Cheques WHERE cheque_book_id = {id}", db_name='Cheque.db')
-                run_query(f"DELETE FROM ChequeBook WHERE id = {id}", db_name='Cheque.db')
+                execute_non_query(f"DELETE FROM Cheques WHERE cheque_book_id = {id}", db_name='Cheque.db')
+                execute_non_query(f"DELETE FROM ChequeBook WHERE id = {id}", db_name='Cheque.db')
 
                 tree.delete(selected_item)
                 messagebox.showinfo("Deleted", "ChequeBook successfully deleted.", parent=window)
             except sqlite3.Error as e:
-                messagebox.showerror("Error", f"Failed to delete ChequeBook: {e}", parent=window)
+                _show_error("Database Error", "Failed to delete cheque book. Please try again.", parent=window, exc=e)
 
     def show_right_click_menu(event):
         # Get selected item
@@ -349,7 +345,7 @@ def Manage_chequeBook(parent = None):
 
 
     query = f"SELECT id, book_name, bank_name, holder_name, account_no, starting_ChequeNo, Current_ChequeNo, total_cheques, issued_date FROM ChequeBook"
-    data = fetch_data(query, db_name='Cheque.db')
+    data = query_all(query, db_name='Cheque.db')
 
     for row in data:
         tree.insert("", "end", values=row)

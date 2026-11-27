@@ -1,16 +1,10 @@
-import sys
-from pathlib import Path
+from utilities.path_utils import (
+    _show_error, get_client_id, get_client_type
+)
 
-if getattr(sys, 'frozen', False):  # Running as a PyInstaller EXE
-    root_path = Path(sys.executable).parent
-else:  # Running as a Python script
-    root_path = Path(__file__).parent.parent
-sys.path.append(str(root_path))
- 
-from utilities.path_utils import *
-from datetime import datetime, timedelta
+from datetime import datetime
 from tkinter import messagebox, filedialog
-import sqlite3
+
 import os
 from openpyxl import Workbook
 from openpyxl.utils import get_column_letter
@@ -26,7 +20,7 @@ def get_opening_balance(client_id, start_date):
     try:
         return ReportRepository.get_opening_balance(client_id, start_date)
     except Exception as e:
-        messagebox.showerror("Report Error", f"Unable to calculate opening balance: {e}")
+        _show_error("Report Error", "Unable to calculate opening balance. Please try again.", exc=e)
         return 0.0
 
 def customer_sales(client_name, first_date, last_date):
@@ -47,7 +41,7 @@ def customer_sales(client_name, first_date, last_date):
         messagebox.showwarning("Filter Warning", str(rfe))
         return []
     except Exception as e:
-        messagebox.showerror("Report Error", f"Error generating customer sales: {e}")
+        _show_error("Report Error", "Error generating customer sales report. Please try again.", exc=e)
         return []
 
 def purchase_report(client_name, first_date, last_date):
@@ -68,7 +62,7 @@ def purchase_report(client_name, first_date, last_date):
         messagebox.showwarning("Filter Warning", str(rfe))
         return []
     except Exception as e:
-        messagebox.showerror("Report Error", f"Error generating purchase report: {e}")
+        _show_error("Report Error", "Error generating purchase report. Please try again.", exc=e)
         return []
 
 def customer_payment(client_name, first_date, last_date):
@@ -89,7 +83,7 @@ def customer_payment(client_name, first_date, last_date):
         messagebox.showwarning("Filter Warning", str(rfe))
         return []
     except Exception as e:
-        messagebox.showerror("Report Error", f"Error generating customer payment report: {e}")
+        _show_error("Report Error", "Error generating customer payment report. Please try again.", exc=e)
         return []
 
 def customer_ledger(client_name, first_date, last_date):
@@ -103,7 +97,7 @@ def customer_ledger(client_name, first_date, last_date):
         messagebox.showwarning("Filter Warning", str(rfe))
         return []
     except Exception as e:
-        messagebox.showerror("Report Error", f"Error generating customer ledger: {e}")
+        _show_error("Report Error", "Error generating customer ledger report. Please try again.", exc=e)
         return []
 
 def cashflow_report(first_date, last_date):
@@ -123,7 +117,7 @@ def cashflow_report(first_date, last_date):
         messagebox.showwarning("Filter Warning", str(rfe))
         return []
     except Exception as e:
-        messagebox.showerror("Report Error", f"Error generating cashflow report: {e}")
+        _show_error("Report Error", "Error generating cash flow report. Please try again.", exc=e)
         return []
 
 def profit_loss_report(first_date, last_date):
@@ -163,7 +157,7 @@ def profit_loss_report(first_date, last_date):
         messagebox.showwarning("Filter Warning", str(rfe))
         return []
     except Exception as e:
-        messagebox.showerror("Report Error", f"Error generating profit & loss report: {e}")
+        _show_error("Report Error", "Error generating profit & loss report. Please try again.", exc=e)
         return []
 
 def revenue_report(first_date, last_date):
@@ -183,7 +177,7 @@ def revenue_report(first_date, last_date):
         messagebox.showwarning("Filter Warning", str(rfe))
         return []
     except Exception as e:
-        messagebox.showerror("Report Error", f"Error generating revenue report: {e}")
+        _show_error("Report Error", "Error generating revenue report. Please try again.", exc=e)
         return []
 
 def expense_analysis(first_date, last_date):
@@ -203,7 +197,7 @@ def expense_analysis(first_date, last_date):
         messagebox.showwarning("Filter Warning", str(rfe))
         return []
     except Exception as e:
-        messagebox.showerror("Report Error", f"Error generating expense analysis: {e}")
+        _show_error("Report Error", "Error generating expense analysis report. Please try again.", exc=e)
         return []
 
 
@@ -238,7 +232,7 @@ def export_report(report_type, start_date, end_date, client_name=None):
                 column_widths = [17, 17, 17, 17, 17, 17, 17, 20]
 
             elif report_type == 'Purchase Reports':
-                headers  = ["Invoice No.", "Date", "Suppiler Name", "Total", "Paid", "Unpaid", "Paid Status", "Reference No."]
+                headers  = ["Invoice No.", "Date", "Supplier Name", "Total", "Paid", "Unpaid", "Paid Status", "Reference No."]
                 data = purchase_report(client_name, start_date, end_date)
                 column_widths = [17, 17, 17, 17, 17, 17, 17, 20]
 
@@ -348,7 +342,7 @@ def export_report(report_type, start_date, end_date, client_name=None):
                         cell.alignment = Alignment(horizontal="center", vertical="center") 
 
             wb.save(file_path)
-            response = messagebox.askquestion("Invoice Saved", f"Invoice saved at {file_path} \nDo you want to open the Excel?")
+            response = messagebox.askquestion("Report Saved", f"Report saved at {file_path} \nDo you want to open the Excel?")
             if response == 'yes':
                 os.startfile(file_path)
 
@@ -357,4 +351,4 @@ def export_report(report_type, start_date, end_date, client_name=None):
     except FileNotFoundError:
         messagebox.showerror("File Not Found", f"Invalid file path: Please provide a valid path.")
     except Exception as e:
-        messagebox.showerror("Unexpected Error", f"An unexpected error occurred while saving the file:\n{e}")
+        _show_error("Export Error", "An unexpected error occurred while saving the report file. Please try again.", exc=e)

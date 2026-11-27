@@ -1,13 +1,11 @@
-import sys
-from pathlib import Path
 
-if getattr(sys, 'frozen', False):  # Running as a PyInstaller EXE
-    root_path = Path(sys.executable).parent
-else:  # Running as a Python script
-    root_path = Path(__file__).parent.parent
-sys.path.append(str(root_path))
- 
-from utilities.path_utils import *
+from pathlib import Path
+from utilities.path_utils import (
+    _show_error, center_window, generate_path, Top_Close,
+    get_client_id, get_client_type
+)
+from core.database import query_all, query_one, execute_non_query, execute_query, get_db_connection
+
 import tkinter as tk
 import sqlite3
 import os
@@ -26,7 +24,7 @@ from UI.gui import customer_payment_in, supplier_payments_out
 
 def manage_invoice_ui(parent = None):
 
-    ASSETS_PATH = Path(generate_path(root_path, "UI", "assets", "frame8"))
+    ASSETS_PATH = Path(generate_path("UI", "assets", "frame8"))
     
     def relative_to_assets(path: str) -> Path:
         return ASSETS_PATH / Path(path)
@@ -98,7 +96,7 @@ def manage_invoice_ui(parent = None):
 
         if selected_option == "Client Name":
             # Create a Combobox for Client Names
-            client_names = [name[0] for name in fetch_data("SELECT name FROM Clients WHERE client_type != 'Staff'")]
+            client_names = [name[0] for name in query_all("SELECT name FROM Clients WHERE client_type != 'Staff'")]
             search_widget = ttk.Combobox(
                 window,
                 values=client_names,
@@ -301,7 +299,7 @@ def manage_invoice_ui(parent = None):
                 query = f"{invoice_query}{where_clause} UNION ALL {purchase_query}{where_clause}"
                 params = invoice_params + purchase_params  # Combine params for both
 
-            result = fetch_data(query, params)
+            result = query_all(query, params)
 
             if result:
                 for row in tree.get_children():
@@ -331,7 +329,7 @@ def manage_invoice_ui(parent = None):
                 payment_type.set(previous_data["payment_type"])
                 return []
         except sqlite3.Error as e:
-            messagebox.showerror("Database Error", f"An error occurred: {e}", parent=window)
+            _show_error("Database Error", "Failed to retrieve invoice records. Please try again.", parent=window, exc=e)
             return []
 
     def export_to_excel():
@@ -405,7 +403,7 @@ def manage_invoice_ui(parent = None):
                 messagebox.showerror("Error", "The file is currently open or locked. Please close it and try again.", parent=window)
             except Exception as e:
                 # Catch any other unexpected errors
-                messagebox.showerror("Error", f"An error occurred: {e}", parent=window)
+                _show_error("Export Error", "Failed to export invoices to Excel. Please try again.", parent=window, exc=e)
         else:
             pass
 
@@ -449,7 +447,7 @@ def manage_invoice_ui(parent = None):
                     os.startfile(file_path)
 
             except Exception as e:
-                messagebox.showerror("Error", f"An error occurred: {e}", parent=window)
+                _show_error("Export Error", "Failed to export invoices to PDF. Please try again.", parent=window, exc=e)
 
         else:
             pass
@@ -814,33 +812,60 @@ def manage_invoice_ui(parent = None):
             if confirm:
                 try:
                     if client_type == "Client":
-                        run_query(
-                            "DELETE FROM Invoices WHERE invoice_no = ? AND client_id = ?",
-                            (invoice_no, client_id)  
-                        )
-                        run_query(
-                            "DELETE FROM InvoiceItems WHERE invoice_no = ? AND client_id = ?",
-                            (invoice_no, client_id)
-                        )
-                        messagebox.showinfo("Success", "The Invoice is successfully Deleted!", parent=window)
+                        inv_table, items_table, pay_cat = "Invoices", "InvoiceItems", "Invoice Payment"
                     elif client_type == "Supplier":
-                        run_query(
-                            "DELETE FROM Purchase WHERE invoice_no = ? AND client_id = ?",
-                            (invoice_no, client_id) 
+                        inv_table, items_table, pay_cat = "Purchase", "PurchaseItems", "Payment For Purchase"
+                    else:
+                        return
+
+                    with get_db_connection() as conn:
+                        inv_rows = execute_query(
+                            f"SELECT total FROM {inv_table} WHERE invoice_no = ? AND client_id = ?",
+                            (invoice_no, client_id),
+                            conn=conn
                         )
-                        run_query(
-                            "DELETE FROM PurchaseItems WHERE invoice_no = ? AND client_id = ?",
-                            (invoice_no, client_id)
+                        inv_total = float(inv_rows[0][0] or 0.0) if inv_rows else 0.0
+
+                        pay_rows = execute_query(
+                            "SELECT COALESCE(SUM(total_amount), 0) FROM Payments WHERE reference_no = ? AND entity_id = ? AND Expanse_type = ?",
+                            (str(invoice_no), client_id, pay_cat),
+                            conn=conn
                         )
-                        messagebox.showinfo("Success", "The Invoice is successfully Deleted!", parent=window)
+                        linked_paid = float(pay_rows[0][0] or 0.0) if pay_rows else 0.0
+
+                        execute_non_query(
+                            f"DELETE FROM {inv_table} WHERE invoice_no = ? AND client_id = ?",
+                            (invoice_no, client_id),
+                            conn=conn
+                        )
+                        execute_non_query(
+                            f"DELETE FROM {items_table} WHERE invoice_no = ? AND client_id = ?",
+                            (invoice_no, client_id),
+                            conn=conn
+                        )
+                        execute_non_query(
+                            "DELETE FROM Payments WHERE reference_no = ? AND entity_id = ? AND Expanse_type = ?",
+                            (str(invoice_no), client_id, pay_cat),
+                            conn=conn
+                        )
+                        bal_reversal = round(inv_total - linked_paid, 2)
+                        if bal_reversal != 0.0:
+                            execute_non_query(
+                                "UPDATE Clients SET closing_bal = ROUND(COALESCE(closing_bal, 0) + ?, 2) WHERE id = ?",
+                                (bal_reversal, client_id),
+                                conn=conn
+                            )
+
+                    tree.delete(selected_item)
+                    messagebox.showinfo("Success", "The Invoice is successfully Deleted!", parent=window)
 
                 except sqlite3.Error as e:
-                    messagebox.showerror(
+                    _show_error(
                         "Database Error",
-                        f"An error occurred while deleting the record: {e}",
-                        parent=window
-                    )                
-                tree.delete(selected_item)
+                        "Failed to delete invoice record. Please try again.",
+                        parent=window,
+                        exc=e
+                    )
 
     def mark_as_paid():
         selected_item = tree.selection()
@@ -867,7 +892,7 @@ def manage_invoice_ui(parent = None):
 
                 try:
                     if client_type == "Client":
-                        run_query(
+                        execute_non_query(
                             "UPDATE Invoices SET paid_status = 'Paid' WHERE invoice_no = ? AND client_id = ?",
                             (invoice_no, client_id)
                         )
@@ -887,8 +912,8 @@ def manage_invoice_ui(parent = None):
                         ))
 
                     elif client_type == "Supplier":
-                        run_query(
-                            "UPDATE Purchases SET paid_status = 'Paid' WHERE invoice_no = ? AND client_id = ?",
+                        execute_non_query(
+                            "UPDATE Purchase SET paid_status = 'Paid' WHERE invoice_no = ? AND client_id = ?",
                             (invoice_no, client_id)
                         )
                         messagebox.showinfo("Success", "The Invoice is successfully Mark as Paid!", parent=window)
@@ -907,10 +932,11 @@ def manage_invoice_ui(parent = None):
                         ))
 
                 except sqlite3.Error as e:
-                    messagebox.showerror(
+                    _show_error(
                         "Database Error",
-                        f"An error occurred while deleting the record: {e}",
-                        parent=window
+                        "Failed to delete invoice record. Please try again.",
+                        parent=window,
+                        exc=e
                     )  
 
             elif result == True:
@@ -953,7 +979,7 @@ def manage_invoice_ui(parent = None):
 
                 try:
                     if client_type == "Client":
-                        run_query(
+                        execute_non_query(
                             "UPDATE Invoices SET paid_status = 'Partially Paid' WHERE invoice_no = ? AND client_id = ?",
                             (invoice_no, client_id)
                         )
@@ -973,8 +999,8 @@ def manage_invoice_ui(parent = None):
                         ))
 
                     elif client_type == "Supplier":
-                        run_query(
-                            "UPDATE Purchases SET paid_status = 'Partially Paid' WHERE invoice_no = ? AND client_id = ?",
+                        execute_non_query(
+                            "UPDATE Purchase SET paid_status = 'Partially Paid' WHERE invoice_no = ? AND client_id = ?",
                             (invoice_no, client_id)
                         )
                         messagebox.showinfo("Success", "The Invoice is successfully Mark as Partially Paid!", parent=window)
@@ -993,10 +1019,11 @@ def manage_invoice_ui(parent = None):
                         ))
                         
                 except sqlite3.Error as e:
-                    messagebox.showerror(
+                    _show_error(
                         "Database Error",
-                        f"An error occurred while deleting the record: {e}", 
-                        parent=window
+                        "Failed to update invoice payment status. Please try again.", 
+                        parent=window,
+                        exc=e
                     )
            
             elif result == True:
@@ -1027,16 +1054,16 @@ def manage_invoice_ui(parent = None):
         client_type = get_client_type(client_name)
 
         if client_type == "Client":
-            rows = fetch_data("SELECT invoice_id FROM Invoices WHERE invoice_no = ? AND client_id = ?", (invoice_no, client_id))
+            rows = query_one("SELECT invoice_id FROM Invoices WHERE invoice_no = ? AND client_id = ?", (invoice_no, client_id))
             if rows:
                 from UI.gui import new_invoice_ui
-                new_invoice_ui(parent=window, invoice_id=rows[0][0])
+                new_invoice_ui(parent=window, invoice_id=rows[0])
                 filter_data()
         elif client_type == "Supplier":
-            rows = fetch_data("SELECT invoice_id FROM Purchase WHERE invoice_no = ? AND client_id = ?", (invoice_no, client_id))
+            rows = query_one("SELECT invoice_id FROM Purchase WHERE invoice_no = ? AND client_id = ?", (invoice_no, client_id))
             if rows:
                 from UI.gui import new_purchase_ui
-                new_purchase_ui(parent=window, invoice_id=rows[0][0])
+                new_purchase_ui(parent=window, invoice_id=rows[0])
                 filter_data()
 
     context_menu = Menu(window, tearoff=0)

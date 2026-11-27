@@ -1,16 +1,8 @@
-import sys
+
 from pathlib import Path
 from dataclasses import dataclass
-from typing import List, Tuple, Optional
-
-if getattr(sys, 'frozen', False):
-    root_path = Path(sys.executable).parent
-else:
-    root_path = Path(__file__).parent.parent
-sys.path.append(str(root_path))
-
-from utilities.path_utils import generate_path, read_ini, fetch_data
-from tkinter import messagebox
+from core.database import query_all, query_one
+from utilities.path_utils import generate_path, read_ini, _show_error
 from reportlab.pdfgen.canvas import Canvas
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfbase import pdfmetrics
@@ -310,7 +302,7 @@ class QRCodeGenerator:
             qr = qrcode.make(upi_url)
             qr.save(str(output_path))
         except Exception as e:
-            messagebox.showerror("UPI Error", f"An error occurred: {e}")
+            _show_error("UPI Error", "Failed to generate UPI QR code for the invoice.", exc=e)
 
 
 Number = Union[int, float, str, Decimal]
@@ -384,7 +376,7 @@ class DatabaseLoader:
     @staticmethod
     def load_invoice_data(client_id: int, invoice_no: int) -> InvoiceData:
         """Load all invoice data"""
-        client_details = fetch_data(
+        client_details = query_all(
             f"SELECT id, name, contact_no, gst, city, state, client_type FROM Clients WHERE id = {client_id}"
         )[0]
 
@@ -393,33 +385,33 @@ class DatabaseLoader:
         item_table = "InvoiceItems" if client_type == "Client" else "PurchaseItems"
         invoice_no_prefix_value = "INV" if client_type == "Client" else "PUR"
 
-        invoice_details = fetch_data(
+        invoice_details = query_one(
             f"""SELECT client_id, invoice_no, Invoice_type, date, due_date, total, reference_no, remarks 
                FROM {invoice_table} 
                WHERE client_id = {client_id} AND invoice_no = {invoice_no}"""
-        )[0]
+        )
 
-        subtotal = float(fetch_data(
+        subtotal = float(query_one(
             f'SELECT SUM(subtotal) FROM {item_table} '
             f'WHERE invoice_no = {invoice_no} AND client_id = {client_id}'
-        )[0][0] or 0)
+        )[0] or 0)
 
-        discount = float(fetch_data(
+        discount = float(query_one(
             f'SELECT SUM(discount_amount) FROM {item_table} '
             f'WHERE invoice_no = {invoice_no} AND client_id = {client_id}'
-        )[0][0] or 0)
+        )[0] or 0)
 
-        total_taxes = float(fetch_data(
+        total_taxes = float(query_one(
             f'SELECT SUM(taxes) FROM {item_table} '
             f'WHERE invoice_no = {invoice_no} AND client_id = {client_id}'
-        )[0][0] or 0)
+        )[0] or 0)
 
-        gross_total = float(fetch_data(
+        gross_total = float(query_one(
             f'SELECT SUM(Total) FROM {item_table} '
             f'WHERE invoice_no = {invoice_no} AND client_id = {client_id}'
-        )[0][0] or 0)
+        )[0] or 0)
 
-        items = fetch_data(
+        items = query_all(
             f'''SELECT 
                     item_name, item_code, quantity, unit, price, subtotal, discount_amount, discount_percent, GST_Rate, taxes, Total  
                 FROM {item_table} 

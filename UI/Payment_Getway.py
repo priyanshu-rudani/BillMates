@@ -1,14 +1,11 @@
-import sys
 from pathlib import Path
 
-if getattr(sys, 'frozen', False):  # Running as a PyInstaller EXE (one Dir)
-    root_path = Path(sys.executable).parent
-else:  # Running as a Python script
-    root_path = Path(__file__).parent.parent
-sys.path.append(str(root_path))
- 
-from utilities.path_utils import *
-from tkinter import Tk, Canvas, Button, PhotoImage, ttk
+from utilities.path_utils import (
+    _show_error, center_window, generate_path, read_ini, write_ini
+)
+
+import tkinter as tk
+from tkinter import Canvas, Button, PhotoImage, ttk, messagebox
 from tkinter import StringVar
 from PIL import Image, ImageTk
 from utilities import text
@@ -18,7 +15,7 @@ import re
 
 def payment_getway(parent = None):
 
-    ASSETS_PATH = Path(generate_path(root_path, "UI", "assets", "frame14"))
+    ASSETS_PATH = Path(generate_path("UI", "assets", "frame14"))
     def relative_to_assets(path: str) -> Path:
         return ASSETS_PATH / Path(path)
     
@@ -28,7 +25,7 @@ def payment_getway(parent = None):
     window.iconbitmap(generate_path("UI", "assets", "BillMates.ico"))
     window.transient(parent)
     window.grab_set()
-    window.title("Merchant Payment Getway")
+    window.title("Merchant Payment Gateway")
     window.configure(bg = "#E7EBFF")
 
 
@@ -49,7 +46,7 @@ def payment_getway(parent = None):
             else:
                 messagebox.showerror("UPI Error", f"UPI ID Not Found", parent=window)
         except Exception as e:
-            messagebox.showerror("UPI Error", f"An error occurred: {e}", parent=window)
+            _show_error("UPI Error", "Failed to generate UPI QR code. Please check your UPI configuration.", parent=window, exc=e)
 
     def on_generate():
         Amount = upi_Amount.get() or 0
@@ -78,8 +75,8 @@ def payment_getway(parent = None):
         entry1.place(x=180, y=64.0, width=220.0, height=20.0)
         BankName_var.set(read_ini("PROFILE", "bank"))
 
-        int12_validation = window.register(lambda value: re.fullmatch(r"[0-9]{0,12}", value) is not None)
-        entry2 = ttk.Entry(window, textvariable=AccountNo_var, validate="key", validatecommand=(int12_validation, "%P"))
+        int18_validation = window.register(lambda value: re.fullmatch(r"[0-9]{0,18}", value) is not None)
+        entry2 = ttk.Entry(window, textvariable=AccountNo_var, validate="key", validatecommand=(int18_validation, "%P"))
         entry2.place(x=180, y=94.0, width=220.0, height=20.0)
         AccountNo_var.set(read_ini("PROFILE", "acc_no"))
 
@@ -143,8 +140,8 @@ def payment_getway(parent = None):
         entry01.place(x=180, y=234.0, width=220.0, height=20.0)
         BankName_var2.set(read_ini("PROFILE", "other_bank"))
 
-        int12_validation = window.register(lambda value: re.fullmatch(r"[0-9]{0,12}", value) is not None)
-        entry02 = ttk.Entry(window, textvariable=AccountNo_var2, validate="key", validatecommand=(int12_validation, "%P"))
+        int18_validation = window.register(lambda value: re.fullmatch(r"[0-9]{0,18}", value) is not None)
+        entry02 = ttk.Entry(window, textvariable=AccountNo_var2, validate="key", validatecommand=(int18_validation, "%P"))
         entry02.place(x=180, y=264.0, width=220.0, height=20.0)
         AccountNo_var2.set(read_ini("PROFILE", "other_acc_no"))
 
@@ -303,14 +300,17 @@ def payment_getway(parent = None):
 
     upi_id = read_ini("PROFILE", "upi")
     name = read_ini("PROFILE", "name")
-    image_image_1 = generate_upi_qr(upi_id, 0, name)
+    image_image_1 = generate_upi_qr(upi_id, 0, name) if upi_id else None
 
-    image_1 = canvas.create_image(
-        634.0,
-        213.0,
-        image=image_image_1
-    )
-    canvas.image = image_image_1
+    if image_image_1:
+        image_1 = canvas.create_image(
+            634.0,
+            213.0,
+            image=image_image_1
+        )
+        canvas.image = image_image_1
+    else:
+        image_1 = canvas.create_image(634.0, 213.0)
 
 
     button_2 = Button(

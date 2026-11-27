@@ -8,7 +8,6 @@ Separates data access from UI and path manipulation.
 import logging
 import os
 import sqlite3
-import sys
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Generator, List, Optional, Sequence, Tuple
@@ -17,11 +16,11 @@ logger = logging.getLogger(__name__)
 
 
 def get_root_path() -> Path:
-    """Returns the application root path."""
-    if getattr(sys, 'frozen', False):
-        return Path(sys.executable).parent
-    return Path(__file__).parent.parent
-
+    from main import ensure_root_on_sys_path
+    root_path = ensure_root_on_sys_path()
+    if root_path:
+        return root_path
+    
 
 def get_database_path(*path_parts: str) -> str:
     """Resolves cross-platform SQLite database path."""
@@ -53,6 +52,9 @@ def _ensure_report_indexes(conn: sqlite3.Connection, db_name: str) -> None:
     try:
         for idx in REPORT_INDEXES:
             conn.execute(idx)
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(Clients)").fetchall()}
+        if cols and "position" not in cols:
+            conn.execute("ALTER TABLE Clients ADD COLUMN position TEXT")
         _indexes_verified = True
     except Exception as exc:
         logger.warning("Could not create/verify report indexes: %s", exc)

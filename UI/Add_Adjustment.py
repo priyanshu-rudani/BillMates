@@ -1,34 +1,31 @@
-import sys
+from utilities.path_utils import (
+    _show_error, center_window, generate_path, Top_Close, 
+    get_client_id, fetch_client_names
+)
+from core.database import execute_non_query, get_db_connection
+import tkinter as tk
+from tkinter import Canvas, Entry, Text, Button, PhotoImage, ttk, messagebox
 from pathlib import Path
-
-if getattr(sys, 'frozen', False):  # Running as a PyInstaller EXE
-    root_path = Path(sys.executable).parent
-else:  # Running as a Python script
-    root_path = Path(__file__).parent.parent
-sys.path.append(str(root_path))
- 
-
 from tkcalendar import DateEntry
 from datetime import datetime
-from tkinter import Tk, Canvas, Entry, Text, Button, PhotoImage, ttk, messagebox
-from utilities.path_utils import *
+
 
 
 def new_adjustment_ui(parent = None):
 
-    ASSETS_PATH = Path(generate_path(root_path, "UI", "assets", "frame12"))
+    ASSETS_PATH = Path(generate_path("UI", "assets", "frame12"))
 
     def relative_to_assets(path: str) -> Path:
         return ASSETS_PATH / Path(path)
 
-    window = tk.Toplevel()
+    window = tk.Toplevel(parent)
+    window.focus()
+    window.transient(parent)
+    window.grab_set()
     window.iconbitmap(generate_path("UI", "assets", "BillMates.ico"))
     window.title("Add Adjustment")
     center_window(window, 500, 390)
-    window.configure(bg = "#FBF6FF")
-    window.transient(parent)
-    window.grab_set() 
-    window.focus()
+    window.configure(bg="#FBF6FF")
 
 
     def Adjustment():
@@ -38,41 +35,53 @@ def new_adjustment_ui(parent = None):
         Type = dropdown.get()
         Date = date_selector.get()
         Payment = payment_type.get()
-        Amount = round(float(amount.get()), 2)
         Text = entry_7.get("1.0", "end").strip()
-
-        if not client_type or Client_type == 'Select':
+        
+        if not client_type or client_type == 'Select':
             messagebox.showerror("Error", "Please select client type", parent=window)
             return
         elif not Client_name or Client_name == 'Select':
             messagebox.showerror("Error", "Please select client name", parent=window)
             return
         elif not Type or Type == 'Select':
-            messagebox.showerror("Error", "Please select a Adjustment type", parent=window)
+            messagebox.showerror("Error", "Please select an Adjustment type", parent=window)
             return
         elif not Date:
             messagebox.showerror("Error", "Please select a date", parent=window)
             return
-        elif not Payment:
+        elif not Payment or Payment == 'Select':
             messagebox.showerror("Error", "Please select a payment type", parent=window)
             return
-        elif not Amount:
-            messagebox.showerror("Error", "Please enter an amount", parent=window)
+
+        try:
+            Amount = round(float(amount.get().strip()), 2)
+            if Amount <= 0:
+                raise ValueError
+        except (ValueError, TypeError):
+            messagebox.showerror("Error", "Total amount must be a valid positive number!", parent=window)
             return
-        elif not Text:
+
+        if not Text:
             Text = ''
 
         try:
             expanse_type = 'Adjustment Credit' if Type == 'Credit (+)' else 'Adjustment Debit'
-            query = """
-                INSERT INTO Payments (entity_id, entity_type, date, total_amount, payment_mode, reference_no, Expanse_type)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            """
-            params = (Client_id, "Adjustment", Date, Amount, Payment, Text, expanse_type)
-            run_query(query, params)
+            bal_delta = Amount if expanse_type == 'Adjustment Credit' else -Amount
+            with get_db_connection() as conn:
+                query = """
+                    INSERT INTO Payments (entity_id, entity_type, date, total_amount, payment_mode, reference_no, Expanse_type)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """
+                params = (Client_id, "Adjustment", Date, Amount, Payment, Text, expanse_type)
+                execute_non_query(query, params, conn=conn)
+                execute_non_query(
+                    "UPDATE Clients SET closing_bal = ROUND(COALESCE(closing_bal, 0) + ?, 2) WHERE id = ?",
+                    (bal_delta, Client_id),
+                    conn=conn
+                )
             messagebox.showinfo("Success", "Adjustment Payment added successfully!", parent=window)
-        except sqlite3.Error as e:
-            messagebox.showerror("Error", f"Failed to add adjustment payment: {e}", parent=window)
+        except Exception as e:
+            _show_error("Database Error", "Failed to add adjustment payment. Please try again.", parent=window, exc=e)
 
         Client_type.set('Select')
         Client.set('Select')

@@ -1,24 +1,9 @@
 import sys
-import os
-import logging
 from pathlib import Path
-
-if getattr(sys, 'frozen', False):  # Running as a PyInstaller EXE
-    root_path = Path(sys.executable).parent
-else:  # Running as a Python script
-    root_path = Path(__file__).parent.parent
-sys.path.append(str(root_path))
-
 from utilities.path_utils import _show_error
 from core.database import get_database_path
 import sqlite3
 
-try:
-    from tkinter import messagebox
-except ImportError:                  # headless / no Tk available
-    messagebox = None
-
-logger = logging.getLogger(__name__)
 
 
 # =============================================================================
@@ -88,7 +73,8 @@ CLIENTS_SCHEMA = {
             state TEXT NOT NULL,
             client_type TEXT NOT NULL,
             opening_balance REAL DEFAULT 0,
-            closing_bal REAL DEFAULT 0
+            closing_bal REAL DEFAULT 0,
+            position TEXT
         )
     """,
     "Payments": """
@@ -216,7 +202,7 @@ def create_database() -> bool:
             errors.append(str(e))
 
     if errors:
-        _show_error("DB Connection error", "\n\n".join(errors))
+        _show_error("Database Error", "Failed to initialize application database. Please check file permissions or contact support.", exc=True)
         return False
     return True
 

@@ -9,7 +9,6 @@ Separates business logic and database updates from Tkinter GUI:
 * Reusable across Sales/Client payments, Purchase/Supplier payments, and Expense payments
 * Uses centralized database functions (query_one, query_all, execute_non_query)
 """
-from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Optional

@@ -1,15 +1,5 @@
-import sys
-from pathlib import Path
+from utilities.path_utils import generate_path
 
-if getattr(sys, 'frozen', False):  # Running as a PyInstaller EXE
-    root_path = Path(sys.executable).parent
-else:  # Running as a Python script
-    root_path = Path(__file__).parent.parent
-sys.path.append(str(root_path))
- 
-from utilities.path_utils import generate_path, database_path, read_ini, write_ini
-import tkinter as tk
-from tkinter import messagebox
 from reportlab.pdfgen import canvas
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfbase import pdfmetrics
@@ -175,7 +165,7 @@ def export_Cheque(Path, Payee_name, figureAmount, Date_Formate, Cheque_Date, Che
 if __name__ == "__main__":
     export_Cheque(
         Path = "cheque.pdf",
-        Payee_name = "Krishna Fashion",
+        Payee_name = "ABCD Fashion",
         figureAmount = "5000",
         Date_Formate = "DD-MM-YYYY", 
         Cheque_Date = "07/11/2007",

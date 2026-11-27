@@ -7,23 +7,12 @@ Reusable Payment Window component for:
 - Salary Payment
 - Company Expense Payment
 """
-from __future__ import annotations
-
-import sys
-from pathlib import Path
-
-if getattr(sys, 'frozen', False):
-    root_path = Path(sys.executable).parent
-else:
-    root_path = Path(__file__).parent.parent
-sys.path.append(str(root_path))
 
 import tkinter as tk
 from tkinter import ttk, Canvas, Entry, Text, Button, messagebox
 from tkcalendar import DateEntry
 
-from utilities.path_utils import generate_path, center_window, fetch_client_names, Top_Close
-from utilities.window_registry import single_instance, track
+from utilities.path_utils import generate_path, center_window, fetch_client_names, Top_Close, _show_error
 from services.payment_service import PaymentService, PaymentConfig, PaymentInput, PaymentError
 
 
@@ -31,11 +20,11 @@ EXPENSE_TYPES = [
     "Rent",
     "Utilities",
     "Maintenance",
-    "Transposition",
+    "Transportation",
     "Marketing",
     "Loan Interest",
     "Taxes",
-    "Other Expances",
+    "Other Expenses",
 ]
 
 PAYMENT_MODES = ["Cash", "UPI", "Net Banking", "Check", "Card"]
@@ -206,7 +195,7 @@ def open_payment_window(config: PaymentConfig, parent=None):
             else:
                 messagebox.showerror(pe.title, pe.message, parent=window)
         except Exception as exc:
-            messagebox.showerror("Error", f"Failed to record payment: {str(exc)}", parent=window)
+            _show_error("Payment Error", "An error occurred while recording the payment. Please try again.", parent=window, exc=exc)
 
     # Submit Button (native Tkinter Button replacing raster image)
     button_text = BUTTON_LABELS.get(config.name, "Submit Payment")
