@@ -601,6 +601,8 @@ class App(tk.Tk):
     """Main desktop application window with animated startup loader."""
 
     def __init__(self, start_mainloop: bool = True, show_loader: bool = True):
+        import gc
+        gc.collect()
         super().__init__()
         self.withdraw()
         load_bundled_fonts()
@@ -722,6 +724,10 @@ class App(tk.Tk):
         finally:
             if loader is not None:
                 loader.close()
+                try:
+                    self.update_idletasks()
+                except Exception:
+                    pass
 
         self.deiconify()
         if start_mainloop:

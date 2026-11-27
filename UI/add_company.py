@@ -24,17 +24,17 @@ class CompanyForm(ttk.Frame):
         self.mode = mode
 
         # --- Data Variables ---
-        # We use tkinter's control variables to easily get/set widget values.
-        self.business_name = tk.StringVar(value="")
-        self.city = tk.StringVar(value="")
-        self.state_name = tk.StringVar(value="")
-        self.pin_code = tk.StringVar(value="")
-        self.country = tk.StringVar(value="India")
-        self.email = tk.StringVar(value="")
-        self.phone = tk.StringVar(value="")
-        self.pan_no = tk.StringVar(value="")
-        self.gstin = tk.StringVar(value="")
-        self.business_type = tk.StringVar(value="Not Applicable")
+        # Bind explicitly to this frame so variables clean up with the form
+        self.business_name = tk.StringVar(master=self, value="")
+        self.city = tk.StringVar(master=self, value="")
+        self.state_name = tk.StringVar(master=self, value="")
+        self.pin_code = tk.StringVar(master=self, value="")
+        self.country = tk.StringVar(master=self, value="India")
+        self.email = tk.StringVar(master=self, value="")
+        self.phone = tk.StringVar(master=self, value="")
+        self.pan_no = tk.StringVar(master=self, value="")
+        self.gstin = tk.StringVar(master=self, value="")
+        self.business_type = tk.StringVar(master=self, value="Not Applicable")
 
         # --- Create and Layout Widgets ---
         self._create_widgets()
@@ -240,6 +240,12 @@ def add_company(Mode='new', parent = None):
     app.resizable(False, False)
     app.bind("<Escape>", lambda key: app.destroy())
     app.wait_window()
+
+    # Release Tk variables on the main thread before any subsequent Tk() / worker thread starts
+    import gc
+    del form
+    del app
+    gc.collect()
 
     
 # --- How to Call in New and Edit Modes ---
