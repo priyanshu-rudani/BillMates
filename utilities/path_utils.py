@@ -29,13 +29,17 @@ def _show_error(title: str, message: str, parent=None, exc=None) -> None:
 
 
 def generate_path(*path_parts) -> str:
-    """Generates a cross-platform path."""
-    
-    from main import ensure_root_on_sys_path
-    root_path = ensure_root_on_sys_path()
+    """Generates a cross-platform path for bundled assets (supports PyInstaller _MEIPASS)."""
+    import sys
+    from pathlib import Path
 
-    full_path = root_path.joinpath(*path_parts)  # Join root path with provided parts
-    return full_path
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", None)
+        base_path = Path(meipass) if meipass else Path(sys.executable).parent
+    else:
+        base_path = Path(__file__).resolve().parent.parent
+
+    return base_path.joinpath(*path_parts)
 
 
 

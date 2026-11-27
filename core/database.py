@@ -8,6 +8,8 @@ Separates data access from UI and path manipulation.
 import logging
 import os
 import sqlite3
+import sys
+import threading
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Generator, List, Optional, Sequence, Tuple
@@ -16,10 +18,9 @@ logger = logging.getLogger(__name__)
 
 
 def get_root_path() -> Path:
-    from main import ensure_root_on_sys_path
-    root_path = ensure_root_on_sys_path()
-    if root_path:
-        return root_path
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).parent
+    return Path(__file__).resolve().parent.parent
     
 
 def get_database_path(*path_parts: str) -> str:
@@ -44,20 +45,25 @@ REPORT_INDEXES = [
 ]
 
 _indexes_verified = False
+_indexes_lock = threading.Lock()
+
 
 def _ensure_report_indexes(conn: sqlite3.Connection, db_name: str) -> None:
     global _indexes_verified
     if _indexes_verified or db_name != "clients.db":
         return
-    try:
-        for idx in REPORT_INDEXES:
-            conn.execute(idx)
-        cols = {row[1] for row in conn.execute("PRAGMA table_info(Clients)").fetchall()}
-        if cols and "position" not in cols:
-            conn.execute("ALTER TABLE Clients ADD COLUMN position TEXT")
-        _indexes_verified = True
-    except Exception as exc:
-        logger.warning("Could not create/verify report indexes: %s", exc)
+    with _indexes_lock:
+        if _indexes_verified:
+            return
+        try:
+            for idx in REPORT_INDEXES:
+                conn.execute(idx)
+            cols = {row[1] for row in conn.execute("PRAGMA table_info(Clients)").fetchall()}
+            if cols and "position" not in cols:
+                conn.execute("ALTER TABLE Clients ADD COLUMN position TEXT")
+            _indexes_verified = True
+        except Exception as exc:
+            logger.warning("Could not create/verify report indexes: %s", exc)
 
 
 @contextmanager
